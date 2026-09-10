@@ -1,0 +1,23 @@
+# Auto-detect text files and normalize line endings
+* text=auto
+
+# Ensure Linux/Unix shell scripts always preserve LF line endings
+*.sh text eol=lf
+
+# Ensure Windows batch files always use CRLF line endings
+*.bat text eol=crlf
+
+# Python source files
+*.py text diff=python eol=lf
+
+# Documentation and markup
+*.md text
+*.tex text
+*.json text
+
+# Binary formats
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary

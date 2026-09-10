@@ -128,3 +128,51 @@ Each case folder contains a metadata summary:
 | **Right Click + Drag** | Zoom in / out |
 | **Click on table row** | Jumps and centers all slice views to the center of that bounding box |
 | **Skip completed checkbox** | Toggle on to fast-track through pending scans; toggle off to review previously annotated scans |
+
+---
+
+## Supported File Formats
+
+The module automatically searches recursively for the following medical imaging volume extensions:
+- NIfTI: `.nii.gz`, `.nii`
+- NRRD: `.nrrd`, `.nhdr`
+- MetaImage: `.mha`, `.mhd`
+
+Case IDs are parsed from filenames using 4- to 5-digit number patterns (e.g. `patient_01234_CT.nii.gz` $\rightarrow$ `01234`). If no digits are found, the file stem is used. Duplicate IDs within the same folder are automatically resolved with a suffix (`_2`, `_3`).
+
+---
+
+## Repository Structure
+
+```
+├── BoundingBoxNavigator/
+│   └── BoundingBoxNavigator.py   # 3D Slicer scripted loadable module
+├── launch_windows.bat             # One-click Windows launcher (detects Slicer & opens module)
+├── launch_linux.sh                # One-click Linux launcher
+├── how-to-use.pdf                 # Printable 1-page radiologist quick reference guide
+├── how-to-use.tex                 # LaTeX source for the guide
+├── LICENSE                        # MIT License
+├── README.md                      # Documentation
+├── .gitattributes                 # Cross-platform line ending normalization
+└── .gitignore                     # Git ignore rules for build and scan artifacts
+```
+
+---
+
+## Requirements
+
+- **3D Slicer:** Version 5.0 or newer (tested on 5.6+).
+- **Operating System:** Windows 10/11, Linux (Ubuntu 20.04+), macOS.
+- **Hardware:** Standard radiologist or researcher workstation capable of running 3D Slicer.
+
+---
+
+## Contributing & Issues
+
+Contributions and suggestions are welcome! If you run into issues, have questions, or wish to request features, please open an issue on the [GitHub Issues](https://github.com/PieterGort/3d-slicer-annotation-tool/issues) page.
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

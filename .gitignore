@@ -216,3 +216,44 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# =============================================================================
+# Custom rules for 3D Slicer Annotation Tool
+# =============================================================================
+
+# LaTeX intermediate build artifacts (keep how-to-use.pdf and .tex tracked)
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# macOS / Windows OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# Medical imaging scans (prevent accidental commit of local datasets / PHI)
+*.nii
+*.nii.gz
+*.nrrd
+*.nhdr
+*.mha
+*.mhd
+*.dcm
+
+# Local test outputs and data directories
+/test_data/
+/test_cases/
+/test_output/
+/test_out/
+/output/
+
+# 3D Slicer runtime & backup files
+*.mrml.bak
+Slicer.log
+slicer-*.log
+
