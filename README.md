@@ -2,6 +2,8 @@
 
 A streamlined 3D Slicer extension designed for radiologists to quickly navigate through a folder of medical imaging scans (CT volumes) and annotate 3D bounding boxes (Markups ROI). Each bounding box is automatically saved as its own `.mrk.json` file in a dedicated case directory.
 
+> 📄 **Radiologist User Manual:** A complete, printable PDF guide is available in this repository: [**`how-to-use.pdf`**](how-to-use.pdf). Please share this PDF directly with the radiologist!
+
 ---
 
 ## Key Features
@@ -23,28 +25,36 @@ A streamlined 3D Slicer extension designed for radiologists to quickly navigate 
 2. Run the Windows installer and finish setup using default options.
 
 ### 2. Download / Unzip this Tool
-Extract the `3d-slicer-annotation-tool` folder to your computer (e.g. `C:\Users\YourName\Documents\3d-slicer-annotation-tool`).
+1. Download the zip archive (e.g. `3d-slicer-annotation-tool-main.zip`).
+2. **Important:** Right-click the `.zip` file and choose **Extract All...** (Alles uitpakken).
+   *(Do not run directly from inside the zip file without extracting, or Windows will not extract the required subfolders).*
+3. Choose a permanent location, e.g. `C:\Users\YourName\Documents\3d-slicer-annotation-tool`.
 
 ---
 
 ## Launching the Tool
 
-### Option A: Double-Click the Launcher (Recommended)
-Double-click **`launch_windows.bat`**.
-- It will automatically detect your Slicer installation and open Slicer with the **Bounding Box Navigator** module pre-loaded.
+### Option A: Double-Click the Launcher
+Inside the extracted folder, double-click **`launch_windows.bat`**.
+- It automatically detects your Slicer installation (including Start Menu shortcuts), pre-loads the module, and opens Slicer directly into **Bounding Box Navigator**.
 - *(On Linux, run `./launch_linux.sh`)*.
 
-### Option B: Manual Setup inside 3D Slicer
-If you prefer to start Slicer normally:
+### Option B: Manual 1-Time Setup inside 3D Slicer (Most Robust)
+If you prefer to start Slicer normally from your desktop or Start Menu without a batch file:
 1. Open 3D Slicer.
 2. In the top menu, go to **Edit** > **Application Settings** > **Modules**.
-3. Under **Additional module paths**, click **Add** and select the `BoundingBoxNavigator` directory inside this repository.
-4. Restart Slicer when prompted.
-5. In the module selector dropdown at the top, choose **Annotation** > **Bounding Box Navigator**.
+3. Under **Additional module paths**, click **Add** and select the `BoundingBoxNavigator` directory inside the extracted tool.
+4. *(Optional & Recommended)*: In the same settings page, set **Default module** to **Bounding Box Navigator**. That way, every time you start Slicer, it opens straight into your annotation tool!
+5. Click **OK** and restart Slicer when prompted.
+6. The module is now permanently installed. You can also find it anytime in the module dropdown under **Annotation** > **Bounding Box Navigator**.
 
 ---
 
 ## Step-by-Step Annotation Workflow
+
+### 0. Open the Module (if panel is not visible)
+If **BoundingBoxNavigator** did not open automatically on startup:
+- In the top toolbar, go to: **Modules** > **Annotation** > **BoundingBoxNavigator** to display the tool panel on the right.
 
 ### 1. Select Folders & Scan
 1. In the **1. Setup & Folders** section:
