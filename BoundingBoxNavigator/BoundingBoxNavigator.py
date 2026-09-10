@@ -269,8 +269,9 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         volume_path = self.current_case["volume_path"]
 
         # Load CT volume
-        ok, volume_node = slicer.util.loadVolume(str(volume_path), returnNode=True)
-        if not ok or volume_node is None:
+        loaded = slicer.util.loadVolume(str(volume_path))
+        volume_node = loaded[1] if isinstance(loaded, tuple) else loaded
+        if volume_node is None:
             raise RuntimeError(f"Failed to load volume file: {volume_path}")
 
         volume_node.SetName(f"{case_id}_CT")
@@ -480,6 +481,8 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         self.shortcut_b: Optional[qt.QShortcut] = None
         self.shortcut_shift_b: Optional[qt.QShortcut] = None
         self._updating_ui: bool = False
+        self._is_saving: bool = False
+        self._is_loading_case: bool = False
 
     def setup(self):
         super().setup()
@@ -755,9 +758,12 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
 
     def load_case_index(self, index: int):
         """Load case and update all UI views."""
+        if self._is_loading_case:
+            return
         if index < 0 or index >= len(self.logic.cases):
             return
 
+        self._is_loading_case = True
         try:
             result = self.logic.load_case(index)
         except Exception as exc:
@@ -765,6 +771,8 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
             traceback.print_exc()
             slicer.util.errorDisplay(f"Failed to load case {index + 1}:\n{exc}")
             return
+        finally:
+            self._is_loading_case = False
 
         case_info = result["case_info"]
         case_id = case_info["case_id"]
@@ -877,12 +885,15 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
 
     def on_save_clicked(self) -> bool:
         """Save current case annotations."""
+        if self._is_saving:
+            return False
         if self.logic.current_case is None:
             self.set_status("No case loaded to save.", is_error=True)
             return False
 
-        notes = self.notes_edit.text.strip()
+        self._is_saving = True
         try:
+            notes = self.notes_edit.text.strip()
             saved = self.logic.save_current_case(
                 notes=notes,
                 confirm_zero_boxes_fn=slicer.util.confirmYesNoDisplay,
@@ -903,9 +914,13 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
             traceback.print_exc()
             slicer.util.errorDisplay(f"Save failed for case '{self.logic.current_case['case_id']}':\n{exc}")
             return False
+        finally:
+            self._is_saving = False
 
     def on_save_next_clicked(self):
         """Save current case and advance to next."""
+        if self._is_saving:
+            return
         if self.on_save_clicked():
             self._go_to_next_case()
 
