@@ -790,7 +790,7 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         if letter == "R" and self.is_roi_valid(roi_node):
             max_dim = max(roi_node.GetSize())
             if max_dim >= PM_CONFLUENT_THRESHOLD_MM:
-                return "PM confluent (auto ≥30 mm)"
+                return "PM confluent (size >= 30mm)"
         return label
 
     def software_class_for_roi(self, roi_node) -> str:
@@ -1181,7 +1181,7 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         self.plane_warning_label.setVisible(False)
         nav_layout.addWidget(self.plane_warning_label)
 
-        thickness_header = qt.QLabel("Slice thickness (updates axial, coronal, and sagittal):")
+        thickness_header = qt.QLabel("Slice thickness:")
         thickness_header.setStyleSheet("font-weight: bold; margin-top: 6px;")
         nav_layout.addWidget(thickness_header)
 
@@ -1470,7 +1470,6 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
 
         case_info = result["case_info"]
         case_id = case_info["case_id"]
-        completed = self.logic.is_case_completed(case_id)
 
         self._updating_ui = True
         self.case_combobox.setCurrentIndex(index)
@@ -1479,8 +1478,7 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
 
         self.case_details_label.setText(
             f"Case id: {case_id}\n"
-            f"Scan number: {index + 1} out of {len(self.logic.cases)}\n"
-            f"Completed: {'Yes' if completed else 'No'}"
+            f"Scan number: {index + 1} out of {len(self.logic.cases)}"
         )
         self._update_plane_warning(result.get("load_warnings") or [])
         self._update_axial_file_label()
@@ -1515,10 +1513,10 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         for thickness in thicknesses:
             button = qt.QPushButton(thickness_display_label(thickness))
             button.setCheckable(True)
-            button.setMinimumHeight(42)
+            button.setMinimumHeight(32)
             button.setSizePolicy(qt.QSizePolicy.Expanding, qt.QSizePolicy.Fixed)
             button.setStyleSheet(
-                "QPushButton { font-weight: bold; font-size: 13px; padding: 10px 14px; "
+                "QPushButton { font-weight: bold; font-size: 12px; padding: 6px 10px; "
                 "border-radius: 4px; border: 2px solid #90A4AE; }"
                 "QPushButton:checked { background-color: #1565C0; color: white; border-color: #0D47A1; }"
             )
