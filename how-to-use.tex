@@ -44,16 +44,16 @@
     \begin{itemize}[leftmargin=1.2em, itemsep=0.5pt]
         \item Set \textbf{Input Scans Folder} (where your CT scans are) and \textbf{Output Annotations Folder}.
         \item Click \textbf{Scan Folder}. The first unreviewed case loads automatically.
-        \item Each slice view shows the \textbf{original} scan for that plane (axial, coronal, sagittal), not a reconstruction.
+        \item Each slice view shows the \textbf{original} scan for that plane when the file exists; otherwise it reconstructs from the axial volume (a warning is shown).
     \end{itemize}
 
     \item \textbf{Draw Bounding Boxes}
     \begin{itemize}[leftmargin=1.2em, itemsep=0.5pt]
-        \item Press key \textbf{\fbox{\textbf{B}}} on your keyboard (or click \textbf{+ Add Bounding Box}).
+        \item Choose a \textbf{Finding type} (default: PM nodule). Then press \textbf{\fbox{\textbf{B}}} (or click \textbf{+ Add Bounding Box}).
         \item \textbf{Click and drag} across the lesion on any slice view (axial, coronal, or sagittal).
         \item Drag the colored handles on the box to resize it in width, height, and depth.
         \item Scroll through slices with your mouse wheel to check coverage.
-        \item For small nodules on axial, tick \textbf{Axial view: thin slices (TS)} to switch that view from 3\,mm to thin slices (coronal and sagittal stay on 3\,mm).
+        \item Use the large \textbf{slice thickness} buttons (3\,mm, TS, \ldots). For TS (or any thickness without native COR/SAG), coronal and sagittal show reconstructions of that axial scan.
         \item Press \textbf{\fbox{\textbf{B}}} again for each additional lesion.
         \item \textit{To remove a box}: click it in the list and press \textbf{Delete Selected}.
     \end{itemize}
@@ -61,12 +61,13 @@
     \item \textbf{Notes / PCI Score}
     \begin{itemize}[leftmargin=1.2em, itemsep=0.5pt]
         \item Type the PCI score or clinical comments in the \textbf{Notes / PCI} field (optional).
+        \item Optional: in \textbf{4.\ Segmentation}, load a \texttt{.seg.nrrd} or \texttt{.nii.gz} overlay (\texttt{.nii.gz} is imported as a labelmap, not a CT volume).
     \end{itemize}
 
     \item \textbf{Save and Next Scan}
     \begin{itemize}[leftmargin=1.2em, itemsep=0.5pt]
         \item Click \textbf{Save + Next} (large green button).
-        \item Each box is saved as its own \texttt{.mrk.json} file inside a folder named after the case ID.
+        \item Each box is saved as \texttt{R\_1.mrk.json}, \texttt{A\_1.mrk.json}, \ldots inside a folder named after the case ID.
         \item The next unreviewed scan loads immediately.
         \item \textit{If there are 0 lesions (PCI 0)}: click \textbf{Save + Next} and confirm with \textbf{Yes}.
     \end{itemize}
@@ -86,7 +87,8 @@
 \textbf{Right Click + Drag} & Zoom in / out \\
 \textbf{Click row in box table} & Centers all slice views on that lesion \\
 \textbf{Skip completed (checkbox)} & Checked by default. Uncheck to browse or edit past cases \\
-\textbf{Axial view: thin slices (TS)} & Axial viewer only: 3\,mm $\leftrightarrow$ thin slices (disabled if no TS file) \\
+\textbf{Slice thickness buttons} & Switch 3\,mm / TS / other; COR/SAG reconstruct from axial if needed \\
+\textbf{Finding type} & PM nodule (R) default; also ascites, omental cake, stranding, lymph node \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -94,6 +96,6 @@
 \vfill
 \hrule
 \vspace{0.12cm}
-{\footnotesize\color{gray} Outputs are saved to: \texttt{<Output>/<case\_id>/<case\_id>\_box\_01.mrk.json} with summary in \texttt{\_annotation\_done.json}.}
+{\footnotesize\color{gray} Outputs: \texttt{<Output>/<case\_id>/R\_1.mrk.json} (or A/O/S/L) with summary in \texttt{\_annotation\_done.json}.}
 
 \end{document}

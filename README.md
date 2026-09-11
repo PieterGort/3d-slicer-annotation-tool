@@ -9,11 +9,11 @@ A streamlined 3D Slicer extension designed for radiologists to quickly navigate 
 ## Key Features
 
 - **Fast Case-by-Case Navigation:** Step sequentially through a cohort of scans with one click (`Save + Next`).
-- **Native AX / COR / SAG views:** Files named `{case_id}_{AX|COR|SAG}_{phase}_{3mm|TS}.nii.gz` are grouped into one case. The axial, coronal, and sagittal viewers each show the original acquisition (not a reconstruction from a single volume).
-- **Axial thin-slice (TS) toggle:** Switch the axial viewer between 3 mm and thin slices for small nodules. Coronal and sagittal stay on 3 mm.
-- **Automatic Case ID Extraction:** Reads the case ID from the `{case_id}_...` filename pattern (or a 4- or 5-digit run in unmatched names).
-- **Direct 3D Bounding Box Annotation:** Press **`B`** to immediately draw interactive bounding boxes on any 2D slice view or 3D view.
-- **Per-Box `.mrk.json` Outputs:** Saves Slicer's native Markups JSON (`<case_id>_box_01.mrk.json`) for each lesion.
+- **Native AX / COR / SAG views:** Files named `{case_id}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz` are grouped into one case. Each viewer shows the original acquisition when that plane exists.
+- **Slice-thickness buttons:** Large buttons switch 3 mm, TS, or any other axial thickness (2 mm, 5 mm, …). If that thickness has no native COR/SAG, those views show reconstructions of the current axial volume.
+- **Missing-plane fallback:** If AX, COR, or SAG is missing, a warning is shown and COR/SAG are reconstructed from the axial scan (a case with no axial file is skipped).
+- **Finding-type naming:** Dropdown (default **PM nodule**) saves `R_1.mrk.json`, `A_1.mrk.json`, `O_1.mrk.json`, `S_1.mrk.json`, `L_1.mrk.json`. R boxes ≥ 30 mm become `pm_confluent` automatically.
+- **Segmentation overlay:** Panel 4 loads a `.seg.nrrd` file/folder, or a `.nii.gz` labelmap (forced as segmentation, not a CT volume).
 - **Notes & PCI Score Support:** Field to record PCI scores or clinical observations stored alongside the annotations in `_annotation_done.json`.
 - **Skip Completed Cases:** Automatically resumes where you left off; uncheck the option anytime to review prior cases.
 - **Click-to-Jump:** Selecting any box in the table automatically centers all orthogonal slice viewers (Axial, Sagittal, Coronal) on that box.
@@ -66,21 +66,27 @@ If **BoundingBoxNavigator** did not open automatically on startup:
    - Matching files are grouped into one case per `case_id` (e.g. all `1001_*.nii.gz` files become case 1001).
    - Cases are sorted naturally by case ID (e.g. case 1, 2, ..., 10).
    - The first unannotated case loads in Four-Up layout: **Red = original axial**, **Green = original coronal**, **Yellow = original sagittal**, with standard CT-Abdomen windowing (Window: 350, Level: 40).
-   - Tick **Axial view: thin slices (TS)** when a small nodule is hard to see on 3 mm. This swaps only the axial viewer; coronal and sagittal stay on 3 mm. The checkbox is disabled if the case has no `*_AX_*_TS` file.
+   - Use the large **slice thickness** buttons to switch series (3 mm, TS, 2 mm, 5 mm, …). When a thickness has no native COR/SAG (typical for TS), coronal and sagittal show reconstructions of that axial volume.
 
 ### 2. Draw Bounding Boxes
-1. Press keyboard key **`B`** (or click **➕ Add Bounding Box**).
-2. In any 2D slice view (Red, Yellow, or Green), **click and drag** across the lesion to define its initial bounds.
-3. Use the colored 3D handles on the box to resize or move the box in all three dimensions.
-4. If a scan has multiple lesions, repeat (press **`B`** for each additional lesion).
-5. To delete a box, select it in the table and click **✖ Delete Selected**.
+1. Choose a **Finding type** (default: PM nodule / `R`).
+2. Press keyboard key **`B`** (or click **➕ Add Bounding Box**).
+3. In any 2D slice view (Red, Yellow, or Green), **click and drag** across the lesion to define its initial bounds.
+4. Use the colored 3D handles on the box to resize or move the box in all three dimensions.
+5. If a scan has multiple lesions, repeat (press **`B`** for each additional lesion).
+6. To delete a box, select it in the table and click **✖ Delete Selected**.
 
 ### 3. Record Notes / PCI Score
 - In the **Notes / PCI:** field, optionally type the case's PCI score or comments (e.g. `PCI score 3, localized`).
 
-### 4. Save and Proceed
+### 4. Segmentation overlay (optional)
+1. In **4. Segmentation**, pick a `.seg.nrrd` / `.nii.gz` file or a folder of segmentations.
+2. Click **Load segmentation**. `.nii.gz` files are imported as labelmaps (not as extra CT volumes).
+3. Matching filenames that contain the current case ID are preferred when a folder is selected.
+
+### 5. Save and Proceed
 - Click **💾 Save + Next ▶** (large green button).
-  - Each box is saved as `<output>/<case_id>/<case_id>_box_NN.mrk.json`.
+  - Each box is saved as `<output>/<case_id>/<letter>_<n>.mrk.json` (e.g. `R_1.mrk.json`).
   - A completion marker `_annotation_done.json` is written.
   - Slicer clears the scene and loads the next uncompleted scan.
 - If a case has **0 lesions** (e.g. PCI score 0), clicking Save will ask for confirmation and then mark the case completed with 0 boxes.
@@ -95,8 +101,8 @@ Inside your selected output folder, each case has its own folder named after its
 ```
 <Output_Folder>/
 ├── 1001/
-│   ├── 1001_box_01.mrk.json
-│   ├── 1001_box_02.mrk.json
+│   ├── R_1.mrk.json
+│   ├── A_1.mrk.json
 │   └── _annotation_done.json
 ├── 1002/
 │   └── _annotation_done.json        (example of case with 0 boxes)
@@ -118,9 +124,13 @@ Each case folder contains a metadata summary:
   "completed_at_utc": "2026-09-10T09:30:00Z",
   "num_boxes": 2,
   "box_files": [
-    "1001_box_01.mrk.json",
-    "1001_box_02.mrk.json"
+    "R_1.mrk.json",
+    "A_1.mrk.json"
   ],
+  "box_classes": {
+    "R_1.mrk.json": "pm_nodule",
+    "A_1.mrk.json": "ascites"
+  },
   "notes": "PCI score 2, upper abdomen",
   "format_version": 1
 }
@@ -138,7 +148,8 @@ Each case folder contains a metadata summary:
 | **Right Click + Drag** | Zoom in / out |
 | **Click on table row** | Jumps and centers all slice views to the center of that bounding box |
 | **Skip completed checkbox** | Toggle on to fast-track through pending scans; toggle off to review previously annotated scans |
-| **Axial view: thin slices (TS)** | Swap the axial viewer to the original thin-slice scan (3 mm remains the default; COR/SAG stay on 3 mm) |
+| **Slice thickness buttons** | Switch 3 mm / TS / other axial thicknesses; COR/SAG reconstruct from the current axial scan when no native pair exists |
+| **Finding type dropdown** | Names the next box (`R` PM nodule default, `A` ascites, `O` omental cake, `S` stranding, `L` lymph node) |
 
 ---
 
@@ -155,7 +166,7 @@ Place all volumes for a batch in one folder (subfolders are scanned recursively)
 | `{case_id}` | e.g. `1001` | Groups files into one case |
 | `{view plane}` | `AX`, `COR`, `SAG` | Native acquisition shown in that slice viewer |
 | `{phase}` | e.g. `pvp` | Contrast phase (parsed, not used for grouping) |
-| `{slice thickness}` | `3mm` or `TS` | Default views use `3mm`; `TS` is axial-only on demand |
+| `{slice thickness}` | `3mm`, `TS`, `2mm`, `5mm`, … | Default views prefer `3mm`; other axial thicknesses are offered as buttons |
 
 Example (cases 1001–1004; 1004 has no thin-slice axial):
 
@@ -176,11 +187,9 @@ scans/
 ```
 
 Behaviour:
-- **Red (axial)** shows `*_AX_*_3mm` by default. Tick **Axial view: thin slices (TS)** to load `*_AX_*_TS` (lazy-loaded; not read until requested).
-- **Green (coronal)** shows `*_COR_*_3mm`.
-- **Yellow (sagittal)** shows `*_SAG_*_3mm`.
-- If COR or SAG is missing, that viewer falls back to a reconstruction from the axial volume and a scan warning is logged.
-- A case with no axial volume is skipped.
+- **Red (axial)** shows `*_AX_*_3mm` by default. Use the thickness buttons to load `*_AX_*_TS` (or 2 mm / 5 mm); those volumes are lazy-loaded.
+- **Green / Yellow** show native `*_COR_*` / `*_SAG_*` of the same thickness when present. Otherwise they show reconstructions of the current axial volume.
+- If AX, COR, or SAG is missing, a warning is shown and missing planes are reconstructed from the axial scan. A case with no axial volume is skipped.
 
 ## Supported File Formats
 

@@ -35,8 +35,26 @@ CT_ABDOMEN_LEVEL = 40.0
 SETTINGS_KEY_INPUT_DIR = "BoundingBoxNavigator/InputDir"
 SETTINGS_KEY_OUTPUT_DIR = "BoundingBoxNavigator/OutputDir"
 SETTINGS_KEY_SKIP_COMPLETED = "BoundingBoxNavigator/SkipCompleted"
+SETTINGS_KEY_SEG_PATH = "BoundingBoxNavigator/SegmentationPath"
 
 COMPLETION_MARKER_FILENAME = "_annotation_done.json"
+ROI_ATTR_LETTER = "BBN_finding_letter"
+PM_CONFLUENT_THRESHOLD_MM = 30.0
+
+# Letter is the filename class; software class for R depends on size.
+FINDING_TYPES: Tuple[Tuple[str, str, str], ...] = (
+    ("R", "PM nodule", "pm_nodule"),
+    ("A", "Ascites", "ascites"),
+    ("O", "Omental cake", "omental_cake"),
+    ("S", "Fat stranding", "stranding"),
+    ("L", "Lymph node", "lymph_node"),
+)
+FINDING_LABEL_BY_LETTER = {letter: label for letter, label, _ in FINDING_TYPES}
+FINDING_CLASS_BY_LETTER = {letter: class_id for letter, _, class_id in FINDING_TYPES}
+DEFAULT_FINDING_LETTER = "R"
+
+MARKUP_NAME_RE = re.compile(r"^([RAOSL])[-_](\d+)$", re.IGNORECASE)
+SEGMENTATION_FILE_SUFFIXES = (".seg.nrrd", ".nii.gz", ".nii")
 
 SUPPORTED_EXTENSIONS = (
     ".nii.gz",
@@ -115,13 +133,52 @@ def parse_scan_filename(filename_or_path: Path | str) -> Optional[Dict[str, str]
     }
 
 
-def primary_axial_key(volumes: Dict[str, Path]) -> Optional[str]:
-    """Prefer AX_3mm, then AX_TS."""
-    if AXIAL_3MM_KEY in volumes:
-        return AXIAL_3MM_KEY
-    if AXIAL_TS_KEY in volumes:
-        return AXIAL_TS_KEY
+def thickness_sort_key(thickness: str) -> Tuple[int, float]:
+    """Sort millimeter thicknesses ascending; TS last."""
+    if thickness.upper() == "TS":
+        return (1, 9999.0)
+    match = re.match(r"(\d+(?:\.\d+)?)", thickness)
+    if match:
+        return (0, float(match.group(1)))
+    return (0, 9998.0)
+
+
+def thickness_display_label(thickness: str) -> str:
+    if thickness.upper() == "TS":
+        return "Thin slices (TS)"
+    return thickness.replace("mm", " mm")
+
+
+def available_axial_thicknesses(volumes: Dict[str, Path]) -> List[str]:
+    found = [key[3:] for key in volumes if key.startswith("AX_")]
+    found.sort(key=thickness_sort_key)
+    return found
+
+
+def default_axial_thickness(volumes: Dict[str, Path]) -> Optional[str]:
+    """Prefer 3mm, then any other millimeter axial, then TS."""
+    thicknesses = available_axial_thicknesses(volumes)
+    if "3mm" in thicknesses:
+        return "3mm"
+    non_ts = [t for t in thicknesses if t.upper() != "TS"]
+    if non_ts:
+        return non_ts[0]
+    if thicknesses:
+        return thicknesses[0]
     return None
+
+
+def primary_axial_key(volumes: Dict[str, Path]) -> Optional[str]:
+    """Prefer AX_3mm, then another AX_* mm volume, then AX_TS."""
+    thickness = default_axial_thickness(volumes)
+    return f"AX_{thickness}" if thickness else None
+
+
+def plane_keys_for(volumes: Dict[str, Path], plane: str) -> List[str]:
+    prefix = f"{plane.upper()}_"
+    keys = [key for key in volumes if key.startswith(prefix)]
+    keys.sort(key=lambda k: thickness_sort_key(k[len(prefix) :]))
+    return keys
 
 
 def natural_sort_key(value: Any) -> list:
@@ -158,9 +215,10 @@ class BoundingBoxNavigator(ScriptedLoadableModule):
         self.parent.contributors = ["Pieter Gort"]
         self.parent.helpText = (
             "Navigate a folder of CT scans and annotate 3D bounding boxes (Markups ROI). "
-            "Files named {case_id}_{AX|COR|SAG}_{phase}_{3mm|TS}.nii.gz are grouped per case; "
-            "native axial, coronal, and sagittal volumes are shown in their own views. "
-            "Boxes are saved as individual .mrk.json files in per-case output folders."
+            "Files named {case_id}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz are grouped per case. "
+            "Native AX/COR/SAG volumes are shown when present; missing planes or a thickness "
+            "without a native pair (e.g. TS) use reconstructions of the current axial volume. "
+            "Boxes are saved as <letter>_<n>.mrk.json (R, A, O, S, L)."
         )
         self.parent.acknowledgementText = (
             "Developed for fast medical imaging annotation in 3D Slicer."
@@ -180,7 +238,10 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         self.current_case: Optional[Dict[str, Any]] = None
         self.current_volume_nodes: Dict[str, slicer.vtkMRMLScalarVolumeNode] = {}
         self.current_roi_nodes: List[slicer.vtkMRMLMarkupsROINode] = []
+        self.current_segmentation_nodes: List[Any] = []
+        self.current_axial_thickness: Optional[str] = None
         self.axial_using_ts: bool = False
+        self.load_warnings: List[str] = []
 
     def _warn(self, message: str) -> None:
         self.scan_warnings.append(message)
@@ -202,7 +263,9 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         self.current_index = -1
         self.current_case = None
         self.current_volume_nodes = {}
+        self.current_axial_thickness = None
         self.axial_using_ts = False
+        self.load_warnings = []
 
         if not self.input_dir.exists() or not self.input_dir.is_dir():
             raise ValueError(f"Input directory does not exist: {self.input_dir}")
@@ -278,18 +341,23 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
                 )
                 continue
 
-            if CORONAL_3MM_KEY not in volumes:
+            missing_planes: List[str] = []
+            if not plane_keys_for(volumes, "COR"):
+                missing_planes.append("COR")
                 self._warn(
-                    f"Case '{case_id}' is missing {CORONAL_3MM_KEY}; "
-                    "coronal view will show a reconstruction from the axial volume."
+                    f"Case '{case_id}' has no coronal volume; "
+                    "coronal view will show a reconstruction from the axial scan."
                 )
-            if SAGITTAL_3MM_KEY not in volumes:
+            if not plane_keys_for(volumes, "SAG"):
+                missing_planes.append("SAG")
                 self._warn(
-                    f"Case '{case_id}' is missing {SAGITTAL_3MM_KEY}; "
-                    "sagittal view will show a reconstruction from the axial volume."
+                    f"Case '{case_id}' has no sagittal volume; "
+                    "sagittal view will show a reconstruction from the axial scan."
                 )
 
             primary_path = volumes[ax_key]
+            axial_thicknesses = available_axial_thicknesses(volumes)
+            default_thickness = default_axial_thickness(volumes)
             case_records.append(
                 {
                     "case_id": case_id,
@@ -297,7 +365,10 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
                     "volume_path": primary_path,
                     "filename": primary_path.name,
                     "volumes": volumes,
+                    "axial_thicknesses": axial_thicknesses,
+                    "default_axial_thickness": default_thickness,
                     "has_axial_ts": AXIAL_TS_KEY in volumes,
+                    "missing_planes": missing_planes,
                     "legacy": bool(rec.get("legacy")),
                     "phase": rec.get("phase"),
                 }
@@ -389,7 +460,28 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             seen_ids.add(node_id)
             self._remove_volume_node(volume_node)
         self.current_volume_nodes = {}
+        self.current_axial_thickness = None
         self.axial_using_ts = False
+        self.load_warnings = []
+
+        for seg_node in list(self.current_segmentation_nodes):
+            self._remove_segmentation_node(seg_node)
+        self.current_segmentation_nodes = []
+
+    def _remove_segmentation_node(self, seg_node) -> None:
+        if seg_node is None:
+            return
+        try:
+            display_node = seg_node.GetDisplayNode()
+            if display_node and slicer.mrmlScene.GetNodeByID(display_node.GetID()):
+                slicer.mrmlScene.RemoveNode(display_node)
+        except Exception:
+            pass
+        try:
+            if slicer.mrmlScene.GetNodeByID(seg_node.GetID()):
+                slicer.mrmlScene.RemoveNode(seg_node)
+        except Exception:
+            pass
 
     def _ensure_four_up_layout(self) -> None:
         layout_manager = slicer.app.layoutManager()
@@ -401,9 +493,13 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             print(f"Warning: could not switch to Four-Up layout: {exc}")
 
     def _assign_volume_to_view(
-        self, view_name: str, volume_node, fit: bool = True
+        self, view_name: str, volume_node, fit: bool = True, reconstruct: bool = False
     ) -> None:
-        """Show volume_node in a named slice view (Red/Green/Yellow), unlinked from other views."""
+        """
+        Show volume_node in a named slice view (Red/Green/Yellow).
+        Native acquisitions use RotateToVolumePlane. Reconstructions keep the
+        standard axial/coronal/sagittal orientation of that viewer.
+        """
         if volume_node is None:
             return
         layout_manager = slicer.app.layoutManager()
@@ -421,11 +517,39 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             composite.SetHotLinkedControl(False)
         composite.SetBackgroundVolumeID(volume_node.GetID())
         try:
-            slice_node.RotateToVolumePlane(volume_node)
+            if reconstruct:
+                if view_name == "Red":
+                    slice_node.SetOrientationToAxial()
+                elif view_name == "Green":
+                    slice_node.SetOrientationToCoronal()
+                elif view_name == "Yellow":
+                    slice_node.SetOrientationToSagittal()
+            else:
+                slice_node.RotateToVolumePlane(volume_node)
         except Exception as exc:
-            print(f"Warning: RotateToVolumePlane failed for {view_name}: {exc}")
+            print(f"Warning: could not orient slice view {view_name}: {exc}")
         if fit:
             slice_logic.FitSliceToAll()
+
+    def _slice_offset(self, view_name: str) -> Optional[float]:
+        layout_manager = slicer.app.layoutManager()
+        if layout_manager is None:
+            return None
+        slice_widget = layout_manager.sliceWidget(view_name)
+        if slice_widget is None:
+            return None
+        return slice_widget.sliceLogic().GetSliceNode().GetSliceOffset()
+
+    def _set_slice_offset(self, view_name: str, offset: Optional[float]) -> None:
+        if offset is None:
+            return
+        layout_manager = slicer.app.layoutManager()
+        if layout_manager is None:
+            return
+        slice_widget = layout_manager.sliceWidget(view_name)
+        if slice_widget is None:
+            return
+        slice_widget.sliceLogic().GetSliceNode().SetSliceOffset(offset)
 
     def _load_volume_file(self, path: Path, node_name: str):
         """Load a volume without showing it in every slice view."""
@@ -444,20 +568,71 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         self.current_volume_nodes[vol_key] = node
         return node
 
-    def _plane_volume_for_load(
-        self, volumes: Dict[str, Path], plane: str, axial_node, axial_path: Path, case_id: str
-    ):
-        """Return the node to show for a plane; fall back to the axial node if missing."""
-        preferred_keys = [f"{plane}_3mm", f"{plane}_TS"]
-        for key in preferred_keys:
-            path = volumes.get(key)
-            if path is None:
-                continue
-            if path == axial_path:
-                self.current_volume_nodes.setdefault(key, axial_node)
-                return axial_node
-            return self._get_or_load_volume(key, path, case_id)
-        return axial_node
+    def _native_plane_node(self, volumes: Dict[str, Path], plane: str, thickness: str, case_id: str):
+        """Return a loaded native volume for plane+thickness, or None if that file is missing."""
+        key = volume_key(plane, thickness)
+        path = volumes.get(key)
+        if path is None:
+            return None
+        return self._get_or_load_volume(key, path, case_id)
+
+    def apply_thickness_to_views(self, thickness: str, fit: bool = True, preserve_offset: bool = False) -> str:
+        """
+        Show the chosen axial thickness in Red.
+        Use native COR/SAG of the same thickness when they exist; otherwise
+        reconstruct those views from the current axial volume.
+        """
+        if self.current_case is None:
+            raise RuntimeError("No case is currently loaded.")
+        volumes: Dict[str, Path] = self.current_case.get("volumes") or {}
+        case_id = self.current_case["case_id"]
+        thickness = normalize_thickness(thickness)
+        ax_key = volume_key("AX", thickness)
+        ax_path = volumes.get(ax_key)
+        if ax_path is None:
+            raise RuntimeError(f"Case '{case_id}' has no axial volume for thickness '{thickness}'.")
+
+        axial_node = self._get_or_load_volume(ax_key, ax_path, case_id)
+        cor_node = self._native_plane_node(volumes, "COR", thickness, case_id)
+        sag_node = self._native_plane_node(volumes, "SAG", thickness, case_id)
+
+        self.load_warnings = []
+        if cor_node is None:
+            self.load_warnings.append(
+                f"No native COR {thickness_display_label(thickness)} volume — "
+                "coronal view is a reconstruction of the current axial scan."
+            )
+            cor_node = axial_node
+            cor_reconstruct = True
+        else:
+            cor_reconstruct = False
+        if sag_node is None:
+            self.load_warnings.append(
+                f"No native SAG {thickness_display_label(thickness)} volume — "
+                "sagittal view is a reconstruction of the current axial scan."
+            )
+            sag_node = axial_node
+            sag_reconstruct = True
+        else:
+            sag_reconstruct = False
+
+        offsets = {}
+        if preserve_offset:
+            for view_name in ("Red", "Green", "Yellow"):
+                offsets[view_name] = self._slice_offset(view_name)
+
+        self._ensure_four_up_layout()
+        self._assign_volume_to_view("Red", axial_node, fit=fit, reconstruct=False)
+        self._assign_volume_to_view("Green", cor_node, fit=fit, reconstruct=cor_reconstruct)
+        self._assign_volume_to_view("Yellow", sag_node, fit=fit, reconstruct=sag_reconstruct)
+
+        if preserve_offset:
+            for view_name, offset in offsets.items():
+                self._set_slice_offset(view_name, offset)
+
+        self.current_axial_thickness = thickness
+        self.axial_using_ts = thickness.upper() == "TS"
+        return axial_node.GetName()
 
     def load_case(self, index: int) -> Dict[str, Any]:
         """Load native AX/COR/SAG volumes for a case and reload any existing saved boxes."""
@@ -472,24 +647,15 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             AXIAL_3MM_KEY: self.current_case["volume_path"]
         }
 
-        ax_key = primary_axial_key(volumes)
-        if ax_key is None:
-            raise RuntimeError(f"Case '{case_id}' has no axial volume to load.")
-        axial_path = volumes[ax_key]
-        axial_node = self._get_or_load_volume(ax_key, axial_path, case_id)
+        if primary_axial_key(volumes) is None:
+            raise RuntimeError(
+                f"Case '{case_id}' has no axial volume to load. "
+                "Cannot reconstruct coronal/sagittal without an axial scan."
+            )
 
-        cor_node = self._plane_volume_for_load(volumes, "COR", axial_node, axial_path, case_id)
-        sag_node = self._plane_volume_for_load(volumes, "SAG", axial_node, axial_path, case_id)
-
-        self._ensure_four_up_layout()
-        try:
-            self._assign_volume_to_view(PLANE_TO_VIEW["AX"], axial_node, fit=True)
-            self._assign_volume_to_view(PLANE_TO_VIEW["COR"], cor_node, fit=True)
-            self._assign_volume_to_view(PLANE_TO_VIEW["SAG"], sag_node, fit=True)
-        except Exception as exc:
-            print(f"Warning: could not assign volumes to slice views: {exc}")
-
-        self.axial_using_ts = ax_key == AXIAL_TS_KEY
+        thickness = self.current_case.get("default_axial_thickness") or default_axial_thickness(volumes)
+        axial_name = self.apply_thickness_to_views(thickness, fit=True, preserve_offset=False)
+        axial_node = self.current_volume_nodes.get(volume_key("AX", thickness))
 
         notes = ""
         case_dir = self.get_case_output_dir(case_id)
@@ -508,6 +674,7 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
                     roi_node = slicer.util.loadMarkups(str(mrk_file))
                     if roi_node and isinstance(roi_node, slicer.vtkMRMLMarkupsROINode):
                         self._configure_roi_display(roi_node)
+                        self._apply_finding_from_filename(roi_node, mrk_file)
                         self.current_roi_nodes.append(roi_node)
                 except Exception as exc:
                     print(f"Warning: could not load markup file {mrk_file}: {exc}")
@@ -519,62 +686,51 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             "roi_nodes": self.current_roi_nodes,
             "notes": notes,
             "axial_using_ts": self.axial_using_ts,
+            "axial_thickness": self.current_axial_thickness,
+            "axial_name": axial_name,
+            "load_warnings": list(self.load_warnings),
         }
 
+    def set_slice_thickness(self, thickness: str) -> str:
+        """Switch all views to the given axial thickness (lazy-load that volume)."""
+        return self.apply_thickness_to_views(thickness, fit=False, preserve_offset=True)
+
     def set_axial_thickness(self, use_thin_slices: bool) -> str:
-        """
-        Swap only the Red (axial) view between 3 mm and thin-slice (TS) volumes.
-        Preserves the current slice offset so the radiologist stays on the same anatomy.
-        Coronal and sagittal views are not changed.
-        """
+        """Backward-compatible wrapper: True selects TS, False selects the default mm series."""
         if self.current_case is None:
             raise RuntimeError("No case is currently loaded.")
-
-        volumes: Dict[str, Path] = self.current_case.get("volumes") or {}
-        case_id = self.current_case["case_id"]
-
+        volumes = self.current_case.get("volumes") or {}
         if use_thin_slices:
-            ts_path = volumes.get(AXIAL_TS_KEY)
-            if ts_path is None:
-                raise RuntimeError(f"Case '{case_id}' has no axial thin-slice (TS) volume.")
-            target = self._get_or_load_volume(AXIAL_TS_KEY, ts_path, case_id)
-        else:
-            path_3mm = volumes.get(AXIAL_3MM_KEY)
-            if path_3mm is not None:
-                target = self._get_or_load_volume(AXIAL_3MM_KEY, path_3mm, case_id)
-            else:
-                target = self.current_volume_nodes.get(AXIAL_TS_KEY)
-                if target is None:
-                    raise RuntimeError(f"Case '{case_id}' has no axial volume to display.")
-
-        layout_manager = slicer.app.layoutManager()
-        offset = None
-        slice_node = None
-        if layout_manager:
-            slice_widget = layout_manager.sliceWidget("Red")
-            if slice_widget:
-                slice_logic = slice_widget.sliceLogic()
-                slice_node = slice_logic.GetSliceNode()
-                offset = slice_node.GetSliceOffset()
-
-        self._assign_volume_to_view("Red", target, fit=False)
-        if slice_node is not None and offset is not None:
-            slice_node.SetSliceOffset(offset)
-
-        self.axial_using_ts = bool(use_thin_slices and AXIAL_TS_KEY in volumes)
-        return target.GetName()
+            return self.set_slice_thickness("TS")
+        default = self.current_case.get("default_axial_thickness") or default_axial_thickness(volumes) or "3mm"
+        if default.upper() == "TS":
+            default = "3mm" if AXIAL_3MM_KEY in volumes else default
+        return self.set_slice_thickness(default)
 
     def active_axial_filename(self) -> str:
         """Filename currently shown in the axial (Red) view."""
         if self.current_case is None:
             return ""
         volumes: Dict[str, Path] = self.current_case.get("volumes") or {}
-        if self.axial_using_ts and AXIAL_TS_KEY in volumes:
-            return volumes[AXIAL_TS_KEY].name
+        thickness = self.current_axial_thickness
+        if thickness:
+            path = volumes.get(volume_key("AX", thickness))
+            if path:
+                return path.name
         ax_key = primary_axial_key(volumes)
         if ax_key and ax_key in volumes:
             return volumes[ax_key].name
         return str(self.current_case.get("filename", ""))
+
+    def cor_sag_are_reconstructions(self) -> bool:
+        if self.current_case is None or not self.current_axial_thickness:
+            return False
+        volumes = self.current_case.get("volumes") or {}
+        thickness = self.current_axial_thickness
+        return (
+            volume_key("COR", thickness) not in volumes
+            or volume_key("SAG", thickness) not in volumes
+        )
 
     def _configure_roi_display(self, roi_node: slicer.vtkMRMLMarkupsROINode) -> None:
         """Configure interactive handles and visibility for 3D bounding box ROI."""
@@ -592,18 +748,73 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         display_node.SetSelectedColor(1.0, 0.25, 0.25)  # Bright coral/red when selected
         display_node.SetPropertiesLabelVisibility(True)
 
-    def add_bounding_box(self) -> slicer.vtkMRMLMarkupsROINode:
+    def _apply_finding_from_filename(self, roi_node, mrk_file: Path) -> None:
+        stem = get_clean_stem(mrk_file)
+        if stem.endswith(".mrk"):
+            stem = stem[: -len(".mrk")]
+        match = MARKUP_NAME_RE.match(stem)
+        letter = match.group(1).upper() if match else DEFAULT_FINDING_LETTER
+        roi_node.SetAttribute(ROI_ATTR_LETTER, letter)
+        roi_node.SetName(self._preview_box_name(letter, roi_node))
+
+    def _roi_letter(self, roi_node) -> str:
+        letter = ""
+        try:
+            letter = str(roi_node.GetAttribute(ROI_ATTR_LETTER) or "")
+        except Exception:
+            letter = ""
+        if letter.upper() in FINDING_LABEL_BY_LETTER:
+            return letter.upper()
+        match = MARKUP_NAME_RE.match(roi_node.GetName() or "")
+        if match:
+            return match.group(1).upper()
+        return DEFAULT_FINDING_LETTER
+
+    def _preview_box_name(self, letter: str, roi_node=None) -> str:
+        count = 1
+        for roi in self.current_roi_nodes:
+            if roi is roi_node:
+                continue
+            if self._roi_letter(roi) == letter:
+                count += 1
+        if roi_node is not None and self._roi_letter(roi_node) == letter:
+            # Keep a stable preview index among current same-letter boxes
+            same = [roi for roi in self.current_roi_nodes if self._roi_letter(roi) == letter]
+            if roi_node in same:
+                count = same.index(roi_node) + 1
+        return f"{letter}_{count}"
+
+    def finding_label(self, roi_node) -> str:
+        letter = self._roi_letter(roi_node)
+        label = FINDING_LABEL_BY_LETTER.get(letter, "PM nodule")
+        if letter == "R" and self.is_roi_valid(roi_node):
+            max_dim = max(roi_node.GetSize())
+            if max_dim >= PM_CONFLUENT_THRESHOLD_MM:
+                return "PM confluent (auto ≥30 mm)"
+        return label
+
+    def software_class_for_roi(self, roi_node) -> str:
+        letter = self._roi_letter(roi_node)
+        if letter == "R" and self.is_roi_valid(roi_node):
+            if max(roi_node.GetSize()) >= PM_CONFLUENT_THRESHOLD_MM:
+                return "pm_confluent"
+        return FINDING_CLASS_BY_LETTER.get(letter, "pm_nodule")
+
+    def add_bounding_box(self, letter: str = DEFAULT_FINDING_LETTER) -> slicer.vtkMRMLMarkupsROINode:
         """Create a new vtkMRMLMarkupsROINode and activate interactive Place mode."""
         if self.current_case is None:
             raise RuntimeError("No case is currently loaded.")
 
-        case_id = self.current_case["case_id"]
-        box_number = len(self.current_roi_nodes) + 1
-        node_name = f"{case_id}_box_{box_number:02d}"
+        letter = (letter or DEFAULT_FINDING_LETTER).upper()
+        if letter not in FINDING_LABEL_BY_LETTER:
+            letter = DEFAULT_FINDING_LETTER
+        node_name = self._preview_box_name(letter)
 
         roi_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsROINode", node_name)
+        roi_node.SetAttribute(ROI_ATTR_LETTER, letter)
         self._configure_roi_display(roi_node)
         self.current_roi_nodes.append(roi_node)
+        roi_node.SetName(self._preview_box_name(letter, roi_node))
 
         # Activate interactive placement mode so user can immediately click & drag
         selection_node = slicer.mrmlScene.GetNodeByID("vtkMRMLSelectionNodeSingleton")
@@ -660,7 +871,8 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         self, notes: str = "", confirm_zero_boxes_fn=None
     ) -> bool:
         """
-        Save all valid bounding boxes as <case_id>_box_NN.mrk.json in <output>/<case_id>/.
+        Save valid boxes as <letter>_<n>.mrk.json (R/A/O/S/L) in <output>/<case_id>/.
+        R boxes with max diameter ≥ 30 mm are classed pm_confluent automatically.
         Cleans up stale boxes and writes _annotation_done.json completion marker.
         """
         if self.current_case is None:
@@ -699,16 +911,22 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             except Exception as exc:
                 print(f"Warning: could not delete old file {old_file}: {exc}")
 
-        # Renumber and save each ROI
+        # Number 1..n per finding letter and save
+        counters: Dict[str, int] = {}
         saved_filenames: List[str] = []
-        for idx, roi in enumerate(valid_rois, start=1):
-            box_name = f"{case_id}_box_{idx:02d}"
+        box_classes: Dict[str, str] = {}
+        for roi in valid_rois:
+            letter = self._roi_letter(roi)
+            counters[letter] = counters.get(letter, 0) + 1
+            box_name = f"{letter}_{counters[letter]}"
+            roi.SetAttribute(ROI_ATTR_LETTER, letter)
             roi.SetName(box_name)
             target_file = case_dir / f"{box_name}.mrk.json"
             saved = slicer.util.saveNode(roi, str(target_file))
             if not saved:
                 raise RuntimeError(f"Failed to save bounding box to: {target_file}")
             saved_filenames.append(target_file.name)
+            box_classes[target_file.name] = self.software_class_for_roi(roi)
 
         # Write completion marker JSON
         now_utc = (
@@ -726,6 +944,7 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             "completed_at_utc": now_utc,
             "num_boxes": len(valid_rois),
             "box_files": saved_filenames,
+            "box_classes": box_classes,
             "notes": str(notes).strip(),
             "format_version": 1,
         }
@@ -736,6 +955,134 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         tmp_marker.replace(marker_file)
 
         return True
+
+    def find_segmentation_files(
+        self,
+        path: Path,
+        case_id: Optional[str] = None,
+        require_case_match: bool = False,
+    ) -> List[Path]:
+        """Collect .seg.nrrd / .nii.gz segmentation files, skipping CT volume names."""
+        path = Path(path)
+        files: List[Path] = []
+        if path.is_file():
+            files = [path]
+        elif path.is_dir():
+            for candidate in sorted(path.rglob("*"), key=lambda p: natural_sort_key(p.name)):
+                if not candidate.is_file() or candidate.name.startswith("."):
+                    continue
+                lower = candidate.name.lower()
+                if not any(lower.endswith(suffix) for suffix in SEGMENTATION_FILE_SUFFIXES):
+                    continue
+                if parse_scan_filename(candidate) is not None:
+                    continue
+                files.append(candidate)
+        else:
+            raise ValueError(f"Segmentation path does not exist: {path}")
+
+        if case_id:
+            matched = [p for p in files if case_id in p.name]
+            if matched:
+                return matched
+            if require_case_match:
+                return []
+        return files
+
+    def _configure_segmentation_display(self, seg_node) -> None:
+        seg_node.CreateDefaultDisplayNodes()
+        display_node = seg_node.GetDisplayNode()
+        if display_node is None:
+            return
+        display_node.SetVisibility(True)
+        if hasattr(display_node, "SetVisibility2DFill"):
+            display_node.SetVisibility2DFill(True)
+        if hasattr(display_node, "SetVisibility2DOutline"):
+            display_node.SetVisibility2DOutline(True)
+
+    def load_segmentation_file(self, path: Path):
+        """Load a .seg.nrrd or force a .nii.gz/.nii to load as a labelmap segmentation."""
+        path = Path(path)
+        lower = path.name.lower()
+        if lower.endswith(".seg.nrrd"):
+            loaded = slicer.util.loadSegmentation(str(path))
+            seg_node = loaded[1] if isinstance(loaded, tuple) else loaded
+            if seg_node is None:
+                raise RuntimeError(f"Failed to load segmentation: {path}")
+        else:
+            loaded = slicer.util.loadVolume(
+                str(path), properties={"labelmap": True, "show": False}
+            )
+            labelmap = loaded[1] if isinstance(loaded, tuple) else loaded
+            if labelmap is None:
+                raise RuntimeError(f"Failed to load labelmap: {path}")
+            if not isinstance(labelmap, slicer.vtkMRMLLabelMapVolumeNode):
+                labelmap_node = slicer.mrmlScene.AddNewNodeByClass(
+                    "vtkMRMLLabelMapVolumeNode", f"{get_clean_stem(path)}_label"
+                )
+                slicer.modules.volumes.logic().CreateLabelVolumeFromVolume(
+                    slicer.mrmlScene, labelmap_node, labelmap
+                )
+                if slicer.mrmlScene.GetNodeByID(labelmap.GetID()):
+                    slicer.mrmlScene.RemoveNode(labelmap)
+                labelmap = labelmap_node
+            seg_node = slicer.mrmlScene.AddNewNodeByClass(
+                "vtkMRMLSegmentationNode", get_clean_stem(path)
+            )
+            slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(
+                labelmap, seg_node
+            )
+            if slicer.mrmlScene.GetNodeByID(labelmap.GetID()):
+                slicer.mrmlScene.RemoveNode(labelmap)
+
+        self._configure_segmentation_display(seg_node)
+        reference = None
+        if self.current_axial_thickness:
+            reference = self.current_volume_nodes.get(
+                volume_key("AX", self.current_axial_thickness)
+            )
+        if reference is None and self.current_volume_nodes:
+            reference = next(iter(self.current_volume_nodes.values()))
+        if reference is not None:
+            try:
+                seg_node.SetReferenceImageGeometryParameterFromVolumeNode(reference)
+            except Exception:
+                pass
+        self.current_segmentation_nodes.append(seg_node)
+        return seg_node
+
+    def load_segmentations_from_path(
+        self,
+        path: Path,
+        case_id: Optional[str] = None,
+        require_case_match: bool = False,
+    ) -> List[str]:
+        """Replace current segmentations with files from a file or folder."""
+        for seg_node in list(self.current_segmentation_nodes):
+            self._remove_segmentation_node(seg_node)
+        self.current_segmentation_nodes = []
+
+        files = self.find_segmentation_files(
+            path, case_id=case_id, require_case_match=require_case_match
+        )
+        loaded_names: List[str] = []
+        errors: List[str] = []
+        for file_path in files:
+            try:
+                node = self.load_segmentation_file(file_path)
+                loaded_names.append(node.GetName())
+            except Exception as exc:
+                errors.append(f"{file_path.name}: {exc}")
+                print(f"Warning: could not load segmentation {file_path}: {exc}")
+        if not files:
+            raise RuntimeError("No .seg.nrrd or segmentation .nii.gz files found at that path.")
+        if not loaded_names and errors:
+            raise RuntimeError("Failed to load segmentations:\n" + "\n".join(errors))
+        return loaded_names
+
+    def clear_segmentations(self) -> None:
+        for seg_node in list(self.current_segmentation_nodes):
+            self._remove_segmentation_node(seg_node)
+        self.current_segmentation_nodes = []
 
 
 class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
@@ -749,6 +1096,7 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         self._updating_ui: bool = False
         self._is_saving: bool = False
         self._is_loading_case: bool = False
+        self._thickness_buttons: Dict[str, Any] = {}
 
     def setup(self):
         super().setup()
@@ -823,24 +1171,32 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         self.case_details_label = qt.QLabel("No case loaded.")
         self.case_details_label.setWordWrap(True)
         self.case_details_label.setStyleSheet(
-            "padding: 4px; background-color: rgba(128,128,128,0.1); border-radius: 4px;"
+            "padding: 8px; font-size: 13px; background-color: rgba(128,128,128,0.1); border-radius: 4px;"
         )
         nav_layout.addWidget(self.case_details_label)
 
-        # Axial 3 mm / thin-slice toggle (axial view only)
-        ts_row = qt.QHBoxLayout()
-        self.thin_slices_checkbox = qt.QCheckBox("Axial view: thin slices (TS)")
-        self.thin_slices_checkbox.setToolTip(
-            "Switch the axial (Red) view between 3 mm and thin-slice (TS) volumes. "
-            "Coronal and sagittal views stay on 3 mm."
-        )
-        self.thin_slices_checkbox.setEnabled(False)
-        ts_row.addWidget(self.thin_slices_checkbox)
-        self.axial_file_label = qt.QLabel("Axial file: —")
+        self.plane_warning_label = qt.QLabel("")
+        self.plane_warning_label.setWordWrap(True)
+        self.plane_warning_label.setStyleSheet("color: #E65100; font-weight: bold; padding: 2px 4px;")
+        self.plane_warning_label.setVisible(False)
+        nav_layout.addWidget(self.plane_warning_label)
+
+        thickness_header = qt.QLabel("Slice thickness (updates axial, coronal, and sagittal):")
+        thickness_header.setStyleSheet("font-weight: bold; margin-top: 6px;")
+        nav_layout.addWidget(thickness_header)
+
+        self.thickness_buttons_widget = qt.QWidget()
+        self.thickness_buttons_layout = qt.QHBoxLayout(self.thickness_buttons_widget)
+        self.thickness_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        self.thickness_button_group = qt.QButtonGroup(self.thickness_buttons_widget)
+        self.thickness_button_group.setExclusive(True)
+        nav_layout.addWidget(self.thickness_buttons_widget)
+        self._thickness_buttons: Dict[str, Any] = {}
+
+        self.axial_file_label = qt.QLabel("Showing: —")
         self.axial_file_label.setWordWrap(True)
-        self.axial_file_label.setStyleSheet("color: #555; font-size: 11px;")
-        ts_row.addWidget(self.axial_file_label, 1)
-        nav_layout.addLayout(ts_row)
+        self.axial_file_label.setStyleSheet("color: #555; font-size: 11px; padding: 2px 0;")
+        nav_layout.addWidget(self.axial_file_label)
 
         # Primary Navigation buttons
         button_row_1 = qt.QHBoxLayout()
@@ -874,6 +1230,19 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         self.layout.addWidget(box_collapsible)
         box_layout = qt.QVBoxLayout(box_collapsible)
 
+        finding_row = qt.QHBoxLayout()
+        finding_row.addWidget(qt.QLabel("Finding type:"))
+        self.finding_combo = qt.QComboBox()
+        for letter, label, _class_id in FINDING_TYPES:
+            self.finding_combo.addItem(f"{label}  ({letter})", letter)
+        self.finding_combo.setCurrentIndex(0)
+        self.finding_combo.setToolTip(
+            "Saved as <letter>_<n>.mrk.json. PM nodule (R) is the default. "
+            "R boxes ≥ 30 mm are labelled pm_confluent automatically on save."
+        )
+        finding_row.addWidget(self.finding_combo, 1)
+        box_layout.addLayout(finding_row)
+
         # Box Action Buttons
         box_actions_row = qt.QHBoxLayout()
         self.add_box_button = qt.QPushButton("➕ Add Bounding Box (Shortcut: B)")
@@ -890,7 +1259,7 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
 
         # Box Table Widget
         self.box_table = qt.QTableWidget(0, 3)
-        self.box_table.setHorizontalHeaderLabels(["Box Name", "Center (R, A, S)", "Size (W, L, H mm)"])
+        self.box_table.setHorizontalHeaderLabels(["Name", "Finding", "Size (W × L × H mm)"])
         self.box_table.horizontalHeader().setStretchLastSection(True)
         self.box_table.setSelectionBehavior(qt.QAbstractItemView.SelectRows)
         self.box_table.setSelectionMode(qt.QAbstractItemView.SingleSelection)
@@ -907,14 +1276,50 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
 
         # Workflow hint
         hint_label = qt.QLabel(
-            "Workflow: Press 'B' (or click '+ Add Bounding Box'), then click and drag in any slice "
-            "to place. Use the interactive 3D box handles to resize or move. Tick 'thin slices (TS)' "
-            "to inspect small nodules on the original axial thin-slice scan (axial view only). "
-            "Click 'Save + Next ▶' to save per-box .mrk.json and advance."
+            "Workflow: Choose a finding type (PM nodule is default), press 'B', then click and drag "
+            "in any slice. Files are saved as R_1.mrk.json, A_1.mrk.json, … . Use the large "
+            "thickness buttons to switch series; if a thickness has no native COR/SAG, those views "
+            "show reconstructions of the current axial volume."
         )
         hint_label.setWordWrap(True)
         hint_label.setStyleSheet("color: #666; font-size: 11px; padding: 2px;")
         box_layout.addWidget(hint_label)
+
+        # -------------------------------------------------------------
+        # Section 4: Segmentation overlay
+        # -------------------------------------------------------------
+        seg_collapsible = ctk.ctkCollapsibleButton()
+        seg_collapsible.text = "4. Segmentation"
+        self.layout.addWidget(seg_collapsible)
+        seg_layout = qt.QVBoxLayout(seg_collapsible)
+
+        self.seg_path_picker = ctk.ctkPathLineEdit()
+        self.seg_path_picker.filters = ctk.ctkPathLineEdit.Files | ctk.ctkPathLineEdit.Dirs
+        self.seg_path_picker.nameFilters = ["Segmentations (*.seg.nrrd *.nii.gz *.nii)", "All files (*)"]
+        self.seg_path_picker.toolTip = (
+            "A single .seg.nrrd / .nii.gz file, or a folder of segmentations for this scan. "
+            ".nii.gz files are loaded as labelmap segmentations (not as CT volumes)."
+        )
+        saved_seg = slicer.util.settingsValue(SETTINGS_KEY_SEG_PATH, "")
+        if saved_seg:
+            self.seg_path_picker.setCurrentPath(saved_seg)
+        seg_layout.addWidget(qt.QLabel("Segmentation file or folder:"))
+        seg_layout.addWidget(self.seg_path_picker)
+
+        seg_btn_row = qt.QHBoxLayout()
+        self.load_seg_button = qt.QPushButton("Load segmentation")
+        self.load_seg_button.setStyleSheet(
+            "font-weight: bold; padding: 8px; background-color: #6A1B9A; color: white; border-radius: 4px;"
+        )
+        self.clear_seg_button = qt.QPushButton("Clear overlay")
+        seg_btn_row.addWidget(self.load_seg_button, 2)
+        seg_btn_row.addWidget(self.clear_seg_button, 1)
+        seg_layout.addLayout(seg_btn_row)
+
+        self.seg_status_label = qt.QLabel("No segmentation loaded.")
+        self.seg_status_label.setWordWrap(True)
+        self.seg_status_label.setStyleSheet("color: #555; font-size: 11px;")
+        seg_layout.addWidget(self.seg_status_label)
 
         # Add vertical stretch
         self.layout.addStretch(1)
@@ -946,9 +1351,12 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         self.reload_button.clicked.connect(self.on_reload_clicked)
         self.save_button.clicked.connect(self.on_save_clicked)
         self.save_next_button.clicked.connect(self.on_save_next_clicked)
-        self.thin_slices_checkbox.toggled.connect(self.on_thin_slices_toggled)
+        self.thickness_button_group.buttonClicked.connect(self.on_thickness_button_clicked)
 
         self.add_box_button.clicked.connect(self.on_add_box_clicked)
+        self.seg_path_picker.currentPathChanged.connect(self.on_seg_path_changed)
+        self.load_seg_button.clicked.connect(self.on_load_segmentation_clicked)
+        self.clear_seg_button.clicked.connect(self.on_clear_segmentation_clicked)
         self.delete_box_button.clicked.connect(self.on_delete_box_clicked)
         self.delete_all_button.clicked.connect(self.on_delete_all_clicked)
         self.box_table.itemSelectionChanged.connect(self.on_box_table_selection_changed)
@@ -966,6 +1374,9 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
 
     def on_output_dir_changed(self, new_path: str):
         slicer.app.settings().setValue(SETTINGS_KEY_OUTPUT_DIR, new_path)
+
+    def on_seg_path_changed(self, new_path: str):
+        slicer.app.settings().setValue(SETTINGS_KEY_SEG_PATH, new_path)
 
     def on_skip_completed_toggled(self, checked: bool):
         slicer.app.settings().setValue(SETTINGS_KEY_SKIP_COMPLETED, checked)
@@ -1060,71 +1471,127 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         case_info = result["case_info"]
         case_id = case_info["case_id"]
         completed = self.logic.is_case_completed(case_id)
-        volumes = case_info.get("volumes") or {}
 
-        # Update combo box selection without re-triggering load
         self._updating_ui = True
         self.case_combobox.setCurrentIndex(index)
-        has_ts = bool(case_info.get("has_axial_ts"))
-        self.thin_slices_checkbox.setEnabled(has_ts)
-        self.thin_slices_checkbox.setChecked(False)
-        if has_ts:
-            self.thin_slices_checkbox.setToolTip(
-                "Switch the axial (Red) view between 3 mm and thin-slice (TS) volumes. "
-                "Coronal and sagittal views stay on 3 mm."
-            )
-        else:
-            self.thin_slices_checkbox.setToolTip("No *_AX_*_TS file for this case")
+        self._rebuild_thickness_buttons(case_info)
         self._updating_ui = False
 
-        def _file_for(key: str) -> str:
-            path = volumes.get(key)
-            return path.name if path else "(reconstruction from axial)"
-
-        ts_status = "available" if has_ts else "not available"
         self.case_details_label.setText(
-            f"Case: {case_id} ({index + 1} of {len(self.logic.cases)})\n"
-            f"AX: {_file_for(AXIAL_3MM_KEY if AXIAL_3MM_KEY in volumes else AXIAL_TS_KEY)}\n"
-            f"COR: {_file_for(CORONAL_3MM_KEY)}\n"
-            f"SAG: {_file_for(SAGITTAL_3MM_KEY)}\n"
-            f"Thin slices (TS): {ts_status}\n"
-            f"Completed: {'YES (annotations saved)' if completed else 'NO (pending review)'}"
+            f"Case id: {case_id}\n"
+            f"Scan number: {index + 1} out of {len(self.logic.cases)}\n"
+            f"Completed: {'Yes' if completed else 'No'}"
         )
+        self._update_plane_warning(result.get("load_warnings") or [])
         self._update_axial_file_label()
 
-        # Update notes field
         self.notes_edit.setText(result.get("notes", ""))
-
-        # Update bounding boxes table
         self.refresh_box_table()
         self._update_progress_summary()
-        self.set_status(f"Loaded case '{case_id}'. Press 'B' to add bounding boxes.")
+        self._try_autoload_segmentations()
+
+        warning_note = ""
+        if result.get("load_warnings"):
+            warning_note = " " + result["load_warnings"][0]
+        self.set_status(f"Loaded case '{case_id}'. Press 'B' to add bounding boxes.{warning_note}")
+
+    def _rebuild_thickness_buttons(self, case_info: Dict[str, Any]) -> None:
+        while self.thickness_buttons_layout.count():
+            item = self.thickness_buttons_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                self.thickness_button_group.removeButton(widget)
+                widget.deleteLater()
+        self._thickness_buttons = {}
+
+        volumes = case_info.get("volumes") or {}
+        thicknesses = case_info.get("axial_thicknesses") or available_axial_thicknesses(volumes)
+        active = self.logic.current_axial_thickness or case_info.get("default_axial_thickness")
+        if not thicknesses:
+            placeholder = qt.QLabel("No axial thicknesses found for this case.")
+            self.thickness_buttons_layout.addWidget(placeholder)
+            return
+
+        for thickness in thicknesses:
+            button = qt.QPushButton(thickness_display_label(thickness))
+            button.setCheckable(True)
+            button.setMinimumHeight(42)
+            button.setSizePolicy(qt.QSizePolicy.Expanding, qt.QSizePolicy.Fixed)
+            button.setStyleSheet(
+                "QPushButton { font-weight: bold; font-size: 13px; padding: 10px 14px; "
+                "border-radius: 4px; border: 2px solid #90A4AE; }"
+                "QPushButton:checked { background-color: #1565C0; color: white; border-color: #0D47A1; }"
+            )
+            button.setProperty("thickness", thickness)
+            if thickness.upper() == "TS":
+                button.setToolTip(
+                    "Show the original axial thin-slice scan. Coronal and sagittal become "
+                    "reconstructions of this axial volume."
+                )
+            else:
+                button.setToolTip(
+                    f"Show the {thickness_display_label(thickness)} series. "
+                    "Native COR/SAG are used when that thickness exists; otherwise those "
+                    "views are reconstructed from this axial volume."
+                )
+            self.thickness_button_group.addButton(button)
+            self.thickness_buttons_layout.addWidget(button)
+            self._thickness_buttons[thickness] = button
+            if thickness == active:
+                button.setChecked(True)
+
+        if active and active in self._thickness_buttons:
+            self._thickness_buttons[active].setChecked(True)
+        elif self._thickness_buttons:
+            next(iter(self._thickness_buttons.values())).setChecked(True)
+
+    def _update_plane_warning(self, warnings: List[str]) -> None:
+        if warnings:
+            self.plane_warning_label.setText("Warning: " + " ".join(warnings))
+            self.plane_warning_label.setVisible(True)
+        else:
+            self.plane_warning_label.setText("")
+            self.plane_warning_label.setVisible(False)
 
     def _update_axial_file_label(self) -> None:
         filename = self.logic.active_axial_filename()
-        if filename:
-            mode = "thin slices" if self.logic.axial_using_ts else "3 mm"
-            self.axial_file_label.setText(f"Axial file ({mode}): {filename}")
-        else:
-            self.axial_file_label.setText("Axial file: —")
+        thickness = self.logic.current_axial_thickness
+        if not filename:
+            self.axial_file_label.setText("Showing: —")
+            return
+        extra = ""
+        if self.logic.cor_sag_are_reconstructions():
+            extra = " — coronal and sagittal are reconstructions of this axial scan"
+        label = thickness_display_label(thickness) if thickness else "axial"
+        self.axial_file_label.setText(f"Showing {label}: {filename}{extra}")
 
-    def on_thin_slices_toggled(self, checked: bool) -> None:
+    def on_thickness_button_clicked(self, button) -> None:
         if self._updating_ui:
             return
         if self.logic.current_case is None:
             return
+        if isinstance(button, int):
+            button = self.thickness_button_group.button(button)
+        if button is None:
+            return
+        thickness = button.property("thickness")
+        if not thickness:
+            return
         try:
-            self.logic.set_axial_thickness(checked)
+            self.logic.set_slice_thickness(str(thickness))
             self._update_axial_file_label()
-            if checked:
-                self.set_status("Axial view switched to thin slices (TS). Coronal/sagittal remain 3 mm.")
+            self._update_plane_warning(self.logic.load_warnings)
+            if self.logic.cor_sag_are_reconstructions():
+                self.set_status(
+                    f"Switched to {thickness_display_label(str(thickness))}. "
+                    "Coronal and sagittal show reconstructions of the current axial scan."
+                )
             else:
-                self.set_status("Axial view switched back to 3 mm.")
+                self.set_status(
+                    f"Switched to native {thickness_display_label(str(thickness))} AX/COR/SAG."
+                )
         except Exception as exc:
-            self._updating_ui = True
-            self.thin_slices_checkbox.setChecked(False)
-            self._updating_ui = False
-            self.set_status(f"Could not switch axial thickness: {exc}", is_error=True)
+            self.set_status(f"Could not switch slice thickness: {exc}", is_error=True)
 
     def refresh_box_table(self):
         """Populate the table widget with current ROI nodes and dimensions."""
@@ -1132,23 +1599,21 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         for idx, roi in enumerate(self.logic.current_roi_nodes):
             self.box_table.insertRow(idx)
 
-            name = roi.GetName() if roi else f"Box_{idx + 1:02d}"
+            name = roi.GetName() if roi else f"R_{idx + 1}"
             name_item = qt.QTableWidgetItem(name)
             name_item.setData(qt.Qt.UserRole, roi)
 
-            center_text = "(not placed)"
+            finding_text = self.logic.finding_label(roi) if roi else "PM nodule"
             size_text = "(not placed)"
             if roi and self.logic.is_roi_valid(roi):
-                center = roi.GetCenter()
                 size = roi.GetSize()
-                center_text = f"[{center[0]:.1f}, {center[1]:.1f}, {center[2]:.1f}]"
                 size_text = f"{size[0]:.1f} × {size[1]:.1f} × {size[2]:.1f}"
 
-            center_item = qt.QTableWidgetItem(center_text)
+            finding_item = qt.QTableWidgetItem(finding_text)
             size_item = qt.QTableWidgetItem(size_text)
 
             self.box_table.setItem(idx, 0, name_item)
-            self.box_table.setItem(idx, 1, center_item)
+            self.box_table.setItem(idx, 1, finding_item)
             self.box_table.setItem(idx, 2, size_item)
 
     def on_box_table_selection_changed(self):
@@ -1176,10 +1641,12 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
             self.set_status("Scan and load a case before adding bounding boxes.", is_error=True)
             return
         try:
-            roi_node = self.logic.add_bounding_box()
+            letter = self.finding_combo.itemData(self.finding_combo.currentIndex) or DEFAULT_FINDING_LETTER
+            roi_node = self.logic.add_bounding_box(letter=str(letter))
             self.refresh_box_table()
             self.set_status(
-                f"Placing box '{roi_node.GetName()}'. Click and drag in any slice viewer to draw box."
+                f"Placing '{roi_node.GetName()}' ({self.logic.finding_label(roi_node)}). "
+                "Click and drag in any slice viewer to draw box."
             )
         except Exception as exc:
             self.set_status(f"Error adding bounding box: {exc}", is_error=True)
@@ -1286,3 +1753,48 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         """Reload current case from disk."""
         if self.logic.current_index >= 0:
             self.load_case_index(self.logic.current_index)
+
+    def _try_autoload_segmentations(self) -> None:
+        path_str = self.seg_path_picker.currentPath.strip()
+        if not path_str or not os.path.exists(path_str):
+            self.seg_status_label.setText("No segmentation loaded.")
+            return
+        path = Path(path_str)
+        if not path.is_dir():
+            self.seg_status_label.setText("No segmentation loaded. Click Load to overlay a file.")
+            return
+        case = self.logic.current_case
+        if case is None:
+            return
+        try:
+            names = self.logic.load_segmentations_from_path(
+                path, case_id=case["case_id"], require_case_match=True
+            )
+            self.seg_status_label.setText(
+                f"Loaded {len(names)} segmentation(s) for case {case['case_id']}: " + ", ".join(names)
+            )
+        except Exception as exc:
+            self.seg_status_label.setText(f"No matching segmentation in folder ({exc}).")
+
+    def on_load_segmentation_clicked(self):
+        if self.logic.current_case is None:
+            self.set_status("Load a case before adding a segmentation overlay.", is_error=True)
+            return
+        path_str = self.seg_path_picker.currentPath.strip()
+        if not path_str or not os.path.exists(path_str):
+            self.set_status("Select a segmentation file or folder first.", is_error=True)
+            return
+        try:
+            names = self.logic.load_segmentations_from_path(
+                Path(path_str), case_id=self.logic.current_case["case_id"]
+            )
+            self.seg_status_label.setText(f"Loaded {len(names)} segmentation(s): " + ", ".join(names))
+            self.set_status(f"Loaded segmentation overlay ({len(names)}). .nii.gz files were imported as labelmaps.")
+        except Exception as exc:
+            self.set_status(f"Failed to load segmentation: {exc}", is_error=True)
+            slicer.util.errorDisplay(f"Failed to load segmentation:\n{exc}")
+
+    def on_clear_segmentation_clicked(self):
+        self.logic.clear_segmentations()
+        self.seg_status_label.setText("No segmentation loaded.")
+        self.set_status("Cleared segmentation overlay.")
