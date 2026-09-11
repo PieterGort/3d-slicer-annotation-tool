@@ -39,6 +39,8 @@ SETTINGS_KEY_SEG_PATH = "BoundingBoxNavigator/SegmentationPath"
 
 COMPLETION_MARKER_FILENAME = "_annotation_done.json"
 ROI_ATTR_LETTER = "BBN_finding_letter"
+ROI_ATTR_SOURCE_FILE = "BBN_source_filename"
+ROI_ATTR_CONVENTION = "BBN_uses_convention"
 PM_CONFLUENT_THRESHOLD_MM = 30.0
 
 # Letter is the filename class; software class for R depends on size.
@@ -53,7 +55,7 @@ FINDING_LABEL_BY_LETTER = {letter: label for letter, label, _ in FINDING_TYPES}
 FINDING_CLASS_BY_LETTER = {letter: class_id for letter, _, class_id in FINDING_TYPES}
 DEFAULT_FINDING_LETTER = "R"
 
-MARKUP_NAME_RE = re.compile(r"^([RAOSL])[-_](\d+)$", re.IGNORECASE)
+MARKUP_NAME_RE = re.compile(r"^([RAOSL])(?:[-_](\d+))?$", re.IGNORECASE)
 SEGMENTATION_FILE_SUFFIXES = (".seg.nrrd", ".nii.gz", ".nii")
 
 SUPPORTED_EXTENSIONS = (
@@ -76,6 +78,17 @@ AXIAL_3MM_KEY = "AX_3mm"
 AXIAL_TS_KEY = "AX_TS"
 CORONAL_3MM_KEY = "COR_3mm"
 SAGITTAL_3MM_KEY = "SAG_3mm"
+
+
+def markup_stem(path: Path | str) -> str:
+    """Stem of a .mrk.json markup file (handles 'nodule 1.mrk.json' and 'R_1.mrk.json')."""
+    name = Path(path).name
+    lower = name.lower()
+    if lower.endswith(".mrk.json"):
+        return name[: -len(".mrk.json")]
+    if lower.endswith(".json"):
+        return name[: -len(".json")]
+    return get_clean_stem(Path(path))
 
 
 def get_clean_stem(path: Path) -> str:
@@ -379,10 +392,31 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         return self.cases, self.scan_warnings
 
     def get_case_output_dir(self, case_id: str) -> Optional[Path]:
-        """Return the per-case output directory path."""
+        """
+        Return the per-case output directory.
+        Prefers <output>/<case_id>, then folders like 'Scan 1001' that contain that id.
+        """
         if self.output_dir is None:
             return None
-        return self.output_dir / case_id
+        exact = self.output_dir / case_id
+        if exact.is_dir():
+            return exact
+        if self.output_dir.is_dir():
+            matches: List[Path] = []
+            for child in self.output_dir.iterdir():
+                if not child.is_dir():
+                    continue
+                if child.name.lower() == case_id.lower():
+                    return child
+                found = re.search(r"(?<!\d)\d{4,5}(?!\d)", child.name)
+                if found and found.group(0) == case_id:
+                    matches.append(child)
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                matches.sort(key=lambda p: natural_sort_key(p.name))
+                return matches[0]
+        return exact
 
     def is_case_completed(self, case_id: str) -> bool:
         """Check if case has a completed review marker or saved bounding boxes."""
@@ -749,13 +783,29 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         display_node.SetPropertiesLabelVisibility(True)
 
     def _apply_finding_from_filename(self, roi_node, mrk_file: Path) -> None:
-        stem = get_clean_stem(mrk_file)
-        if stem.endswith(".mrk"):
-            stem = stem[: -len(".mrk")]
+        """Keep existing markup names. Only convention files get a finding letter."""
+        stem = markup_stem(mrk_file)
+        roi_node.SetAttribute(ROI_ATTR_SOURCE_FILE, mrk_file.name)
         match = MARKUP_NAME_RE.match(stem)
-        letter = match.group(1).upper() if match else DEFAULT_FINDING_LETTER
-        roi_node.SetAttribute(ROI_ATTR_LETTER, letter)
-        roi_node.SetName(self._preview_box_name(letter, roi_node))
+        if match:
+            letter = match.group(1).upper()
+            roi_node.SetAttribute(ROI_ATTR_LETTER, letter)
+            roi_node.SetAttribute(ROI_ATTR_CONVENTION, "1")
+        else:
+            roi_node.SetAttribute(ROI_ATTR_LETTER, "")
+            roi_node.SetAttribute(ROI_ATTR_CONVENTION, "0")
+        roi_node.SetName(stem)
+
+    def _uses_convention(self, roi_node) -> bool:
+        try:
+            flag = str(roi_node.GetAttribute(ROI_ATTR_CONVENTION) or "")
+            if flag == "1":
+                return True
+            if flag == "0":
+                return False
+        except Exception:
+            pass
+        return bool(MARKUP_NAME_RE.match(roi_node.GetName() or ""))
 
     def _roi_letter(self, roi_node) -> str:
         letter = ""
@@ -768,23 +818,45 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         match = MARKUP_NAME_RE.match(roi_node.GetName() or "")
         if match:
             return match.group(1).upper()
-        return DEFAULT_FINDING_LETTER
+        return ""
 
-    def _preview_box_name(self, letter: str, roi_node=None) -> str:
-        count = 1
+    def _used_convention_numbers(self, letter: str, exclude=None) -> set:
+        used = set()
         for roi in self.current_roi_nodes:
-            if roi is roi_node:
+            if roi is exclude or not self._uses_convention(roi):
                 continue
-            if self._roi_letter(roi) == letter:
-                count += 1
-        if roi_node is not None and self._roi_letter(roi_node) == letter:
-            # Keep a stable preview index among current same-letter boxes
-            same = [roi for roi in self.current_roi_nodes if self._roi_letter(roi) == letter]
-            if roi_node in same:
-                count = same.index(roi_node) + 1
-        return f"{letter}_{count}"
+            match = MARKUP_NAME_RE.match(roi.GetName() or "")
+            if not match or match.group(1).upper() != letter:
+                continue
+            used.add(int(match.group(2)) if match.group(2) else 1)
+        return used
+
+    def _next_convention_name(
+        self, letter: str, exclude=None, reserved_filenames: Optional[set] = None
+    ) -> str:
+        used = self._used_convention_numbers(letter, exclude=exclude)
+        if reserved_filenames:
+            for filename in reserved_filenames:
+                match = MARKUP_NAME_RE.match(markup_stem(filename))
+                if match and match.group(1).upper() == letter:
+                    used.add(int(match.group(2)) if match.group(2) else 1)
+        number = 1
+        while number in used:
+            number += 1
+        return f"{letter}_{number}"
+
+    def _preserved_source_filename(self, roi_node) -> Optional[str]:
+        try:
+            name = str(roi_node.GetAttribute(ROI_ATTR_SOURCE_FILE) or "").strip()
+        except Exception:
+            name = ""
+        if name.lower().endswith(".mrk.json"):
+            return name
+        return None
 
     def finding_label(self, roi_node) -> str:
+        if not self._uses_convention(roi_node):
+            return "—"
         letter = self._roi_letter(roi_node)
         label = FINDING_LABEL_BY_LETTER.get(letter, "PM nodule")
         if letter == "R" and self.is_roi_valid(roi_node):
@@ -794,6 +866,8 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         return label
 
     def software_class_for_roi(self, roi_node) -> str:
+        if not self._uses_convention(roi_node):
+            return "existing"
         letter = self._roi_letter(roi_node)
         if letter == "R" and self.is_roi_valid(roi_node):
             if max(roi_node.GetSize()) >= PM_CONFLUENT_THRESHOLD_MM:
@@ -808,13 +882,14 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         letter = (letter or DEFAULT_FINDING_LETTER).upper()
         if letter not in FINDING_LABEL_BY_LETTER:
             letter = DEFAULT_FINDING_LETTER
-        node_name = self._preview_box_name(letter)
+        node_name = self._next_convention_name(letter)
 
         roi_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsROINode", node_name)
         roi_node.SetAttribute(ROI_ATTR_LETTER, letter)
+        roi_node.SetAttribute(ROI_ATTR_CONVENTION, "1")
         self._configure_roi_display(roi_node)
         self.current_roi_nodes.append(roi_node)
-        roi_node.SetName(self._preview_box_name(letter, roi_node))
+        roi_node.SetName(node_name)
 
         # Activate interactive placement mode so user can immediately click & drag
         selection_node = slicer.mrmlScene.GetNodeByID("vtkMRMLSelectionNodeSingleton")
@@ -871,9 +946,9 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         self, notes: str = "", confirm_zero_boxes_fn=None
     ) -> bool:
         """
-        Save valid boxes as <letter>_<n>.mrk.json (R/A/O/S/L) in <output>/<case_id>/.
-        R boxes with max diameter ≥ 30 mm are classed pm_confluent automatically.
-        Cleans up stale boxes and writes _annotation_done.json completion marker.
+        Save boxes in <output>/<case folder>/.
+        Existing free-form names (e.g. 'nodule 1') are kept. Newly created boxes
+        use <letter>_<n>.mrk.json. R boxes ≥ 30 mm are classed pm_confluent.
         """
         if self.current_case is None:
             raise RuntimeError("No case is currently loaded.")
@@ -881,7 +956,9 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             raise RuntimeError("Output directory is not specified.")
 
         case_id = self.current_case["case_id"]
-        case_dir = self.output_dir / case_id
+        case_dir = self.get_case_output_dir(case_id)
+        if case_dir is None:
+            raise RuntimeError("Output directory is not specified.")
         case_dir.mkdir(parents=True, exist_ok=True)
 
         # Include any ROIs in scene that match
@@ -904,24 +981,54 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
                     slicer.mrmlScene.RemoveNode(roi)
         self.current_roi_nodes = list(valid_rois)
 
-        # Clean stale .mrk.json files in case directory
+        reserved_names: set = set()
+        save_plan: List[Tuple[Any, str]] = []
+        for roi in valid_rois:
+            if self._uses_convention(roi):
+                letter = self._roi_letter(roi) or DEFAULT_FINDING_LETTER
+                roi.SetAttribute(ROI_ATTR_LETTER, letter)
+                roi.SetAttribute(ROI_ATTR_CONVENTION, "1")
+                current_name = roi.GetName() or ""
+                match = MARKUP_NAME_RE.match(current_name)
+                filename = f"{current_name}.mrk.json"
+                if (
+                    not match
+                    or match.group(1).upper() != letter
+                    or filename in reserved_names
+                ):
+                    current_name = self._next_convention_name(
+                        letter, exclude=roi, reserved_filenames=reserved_names
+                    )
+                    roi.SetName(current_name)
+                    filename = f"{current_name}.mrk.json"
+                reserved_names.add(filename)
+                save_plan.append((roi, filename))
+            else:
+                filename = self._preserved_source_filename(roi)
+                if not filename:
+                    filename = f"{roi.GetName()}.mrk.json"
+                if filename in reserved_names:
+                    stem = markup_stem(filename)
+                    suffix = 2
+                    while f"{stem}_{suffix}.mrk.json" in reserved_names:
+                        suffix += 1
+                    filename = f"{stem}_{suffix}.mrk.json"
+                reserved_names.add(filename)
+                roi.SetAttribute(ROI_ATTR_SOURCE_FILE, filename)
+                save_plan.append((roi, filename))
+
         for old_file in case_dir.glob("*.mrk.json"):
+            if old_file.name in reserved_names:
+                continue
             try:
                 old_file.unlink()
             except Exception as exc:
                 print(f"Warning: could not delete old file {old_file}: {exc}")
 
-        # Number 1..n per finding letter and save
-        counters: Dict[str, int] = {}
         saved_filenames: List[str] = []
         box_classes: Dict[str, str] = {}
-        for roi in valid_rois:
-            letter = self._roi_letter(roi)
-            counters[letter] = counters.get(letter, 0) + 1
-            box_name = f"{letter}_{counters[letter]}"
-            roi.SetAttribute(ROI_ATTR_LETTER, letter)
-            roi.SetName(box_name)
-            target_file = case_dir / f"{box_name}.mrk.json"
+        for roi, filename in save_plan:
+            target_file = case_dir / filename
             saved = slicer.util.saveNode(roi, str(target_file))
             if not saved:
                 raise RuntimeError(f"Failed to save bounding box to: {target_file}")
