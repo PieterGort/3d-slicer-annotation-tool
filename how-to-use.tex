@@ -43,7 +43,8 @@
     \item \textbf{Select Folders \& Scan}
     \begin{itemize}[leftmargin=1.2em, itemsep=0.5pt]
         \item Set \textbf{Input Scans Folder} (where your CT scans are) and \textbf{Output Annotations Folder}.
-        \item Click \textbf{Scan Folder}. The first unreviewed scan loads automatically.
+        \item Click \textbf{Scan Folder}. The first unreviewed case loads automatically.
+        \item Each slice view shows the \textbf{original} scan for that plane (axial, coronal, sagittal), not a reconstruction.
     \end{itemize}
 
     \item \textbf{Draw Bounding Boxes}
@@ -52,6 +53,7 @@
         \item \textbf{Click and drag} across the lesion on any slice view (axial, coronal, or sagittal).
         \item Drag the colored handles on the box to resize it in width, height, and depth.
         \item Scroll through slices with your mouse wheel to check coverage.
+        \item For small nodules on axial, tick \textbf{Axial view: thin slices (TS)} to switch that view from 3\,mm to thin slices (coronal and sagittal stay on 3\,mm).
         \item Press \textbf{\fbox{\textbf{B}}} again for each additional lesion.
         \item \textit{To remove a box}: click it in the list and press \textbf{Delete Selected}.
     \end{itemize}
@@ -84,6 +86,7 @@
 \textbf{Right Click + Drag} & Zoom in / out \\
 \textbf{Click row in box table} & Centers all slice views on that lesion \\
 \textbf{Skip completed (checkbox)} & Checked by default. Uncheck to browse or edit past cases \\
+\textbf{Axial view: thin slices (TS)} & Axial viewer only: 3\,mm $\leftrightarrow$ thin slices (disabled if no TS file) \\
 \bottomrule
 \end{tabular}
 \end{center}
