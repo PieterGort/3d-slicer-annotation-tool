@@ -41,6 +41,8 @@ COMPLETION_MARKER_FILENAME = "_annotation_done.json"
 ROI_ATTR_LETTER = "BBN_finding_letter"
 ROI_ATTR_SOURCE_FILE = "BBN_source_filename"
 ROI_ATTR_CONVENTION = "BBN_uses_convention"
+ROI_ATTR_FINDING_TEXT = "BBN_finding_text"
+MRK_ANNOTATION_KEY = "BoundingBoxNavigator"
 PM_CONFLUENT_THRESHOLD_MM = 30.0
 
 # Letter is the filename class; software class for R depends on size.
@@ -55,7 +57,10 @@ FINDING_LABEL_BY_LETTER = {letter: label for letter, label, _ in FINDING_TYPES}
 FINDING_CLASS_BY_LETTER = {letter: class_id for letter, _, class_id in FINDING_TYPES}
 DEFAULT_FINDING_LETTER = "R"
 
-MARKUP_NAME_RE = re.compile(r"^([RAOSL])(?:[-_](\d+))?$", re.IGNORECASE)
+# Exact convention names used to detect finding type: R, R_1. Not 'R_ascites' or 'nodule 1'.
+MARKUP_NAME_RE = re.compile(r"^([RAOSL])(?:_(\d+))?$", re.IGNORECASE)
+# Leading letter_number in an edited name (R_1_test) so new boxes still get the next free index.
+CONVENTION_INDEX_RE = re.compile(r"^([RAOSL])_(\d+)", re.IGNORECASE)
 SEGMENTATION_FILE_SUFFIXES = (".seg.nrrd", ".nii.gz", ".nii")
 
 SUPPORTED_EXTENSIONS = (
@@ -78,6 +83,15 @@ AXIAL_3MM_KEY = "AX_3mm"
 AXIAL_TS_KEY = "AX_TS"
 CORONAL_3MM_KEY = "COR_3mm"
 SAGITTAL_3MM_KEY = "SAG_3mm"
+
+
+def safe_markup_filename(name: str) -> str:
+    """Turn an ROI display name into a .mrk.json filename, keeping spaces."""
+    text = re.sub(r"[\s]+", " ", (name or "").strip())
+    text = text.replace("/", "-").replace("\\", "-").replace("\0", "")
+    if not text:
+        text = "box"
+    return f"{text}.mrk.json"
 
 
 def markup_stem(path: Path | str) -> str:
@@ -692,6 +706,8 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         axial_node = self.current_volume_nodes.get(volume_key("AX", thickness))
 
         notes = ""
+        box_classes: Dict[str, str] = {}
+        box_findings: Dict[str, str] = {}
         case_dir = self.get_case_output_dir(case_id)
         if case_dir and case_dir.is_dir():
             marker_file = case_dir / COMPLETION_MARKER_FILENAME
@@ -699,6 +715,12 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
                 try:
                     payload = json.loads(marker_file.read_text(encoding="utf-8"))
                     notes = str(payload.get("notes", "")).strip()
+                    raw_classes = payload.get("box_classes") or {}
+                    raw_findings = payload.get("box_findings") or {}
+                    if isinstance(raw_classes, dict):
+                        box_classes = {str(k): str(v) for k, v in raw_classes.items()}
+                    if isinstance(raw_findings, dict):
+                        box_findings = {str(k): str(v) for k, v in raw_findings.items()}
                 except Exception:
                     pass
 
@@ -709,6 +731,12 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
                     if roi_node and isinstance(roi_node, slicer.vtkMRMLMarkupsROINode):
                         self._configure_roi_display(roi_node)
                         self._apply_finding_from_filename(roi_node, mrk_file)
+                        self._restore_finding_from_saved(
+                            roi_node,
+                            mrk_file,
+                            box_findings.get(mrk_file.name),
+                            box_classes.get(mrk_file.name),
+                        )
                         self.current_roi_nodes.append(roi_node)
                 except Exception as exc:
                     print(f"Warning: could not load markup file {mrk_file}: {exc}")
@@ -796,6 +824,102 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             roi_node.SetAttribute(ROI_ATTR_CONVENTION, "0")
         roi_node.SetName(stem)
 
+    def _read_annotation_from_mrk(self, mrk_file: Path) -> Dict[str, str]:
+        try:
+            data = json.loads(mrk_file.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        block = data.get(MRK_ANNOTATION_KEY)
+        if not isinstance(block, dict):
+            markups = data.get("markups")
+            if isinstance(markups, list) and markups and isinstance(markups[0], dict):
+                block = markups[0].get(MRK_ANNOTATION_KEY)
+                if not isinstance(block, dict):
+                    control_points = markups[0].get("controlPoints")
+                    if (
+                        isinstance(control_points, list)
+                        and control_points
+                        and isinstance(control_points[0], dict)
+                    ):
+                        description = str(control_points[0].get("description") or "").strip()
+                        return {"finding": description} if description else {}
+                    return {}
+            else:
+                return {}
+        finding = str(block.get("finding") or "").strip()
+        letter = str(block.get("finding_letter") or "").strip()
+        software_class = str(block.get("software_class") or "").strip()
+        out: Dict[str, str] = {}
+        if finding:
+            out["finding"] = finding
+        if letter:
+            out["finding_letter"] = letter
+        if software_class:
+            out["software_class"] = software_class
+        return out
+
+    def _restore_finding_from_saved(
+        self,
+        roi_node,
+        mrk_file: Path,
+        marker_finding: Optional[str] = None,
+        marker_class: Optional[str] = None,
+    ) -> None:
+        """Reload finding text from the .mrk.json, then the case overview file."""
+        annotation = self._read_annotation_from_mrk(mrk_file)
+        finding = annotation.get("finding", "").strip()
+        letter = annotation.get("finding_letter", "").strip().upper()
+        if not finding:
+            finding = str(marker_finding or "").strip()
+        if not finding:
+            fallback = str(marker_class or "").strip()
+            if fallback and fallback not in ("existing",):
+                finding = fallback
+        if letter and letter in FINDING_LABEL_BY_LETTER and not finding:
+            self.set_roi_finding(roi_node, letter)
+            return
+        if finding:
+            self.set_roi_finding_text(roi_node, finding)
+
+    def _write_finding_onto_roi(self, roi_node) -> None:
+        """Keep the finding on the markup node so Slicer writes it into .mrk.json."""
+        finding = self.finding_text_for_save(roi_node)
+        try:
+            if roi_node.GetNumberOfControlPoints() > 0:
+                roi_node.SetNthControlPointDescription(0, finding)
+        except Exception:
+            pass
+
+    def _embed_annotation_in_mrk_json(self, mrk_file: Path, annotation: Dict[str, str]) -> None:
+        """Write finding metadata into the markup file (schema allows extra keys)."""
+        try:
+            data = json.loads(mrk_file.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"Warning: could not read {mrk_file} to embed finding: {exc}")
+            return
+        if not isinstance(data, dict):
+            return
+        data[MRK_ANNOTATION_KEY] = annotation
+        markups = data.get("markups")
+        if isinstance(markups, list) and markups and isinstance(markups[0], dict):
+            markups[0][MRK_ANNOTATION_KEY] = annotation
+            control_points = markups[0].get("controlPoints")
+            if (
+                isinstance(control_points, list)
+                and control_points
+                and isinstance(control_points[0], dict)
+            ):
+                control_points[0]["description"] = annotation.get("finding") or ""
+        try:
+            mrk_file.write_text(
+                json.dumps(data, indent=4, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            print(f"Warning: could not write finding into {mrk_file}: {exc}")
+
     def _uses_convention(self, roi_node) -> bool:
         try:
             flag = str(roi_node.GetAttribute(ROI_ATTR_CONVENTION) or "")
@@ -823,12 +947,14 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
     def _used_convention_numbers(self, letter: str, exclude=None) -> set:
         used = set()
         for roi in self.current_roi_nodes:
-            if roi is exclude or not self._uses_convention(roi):
+            if roi is exclude:
                 continue
-            match = MARKUP_NAME_RE.match(roi.GetName() or "")
-            if not match or match.group(1).upper() != letter:
-                continue
-            used.add(int(match.group(2)) if match.group(2) else 1)
+            name = roi.GetName() or ""
+            match = CONVENTION_INDEX_RE.match(name)
+            if match and match.group(1).upper() == letter:
+                used.add(int(match.group(2)))
+            elif name.upper() == letter:
+                used.add(1)
         return used
 
     def _next_convention_name(
@@ -837,13 +963,26 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         used = self._used_convention_numbers(letter, exclude=exclude)
         if reserved_filenames:
             for filename in reserved_filenames:
-                match = MARKUP_NAME_RE.match(markup_stem(filename))
+                stem = markup_stem(filename)
+                match = CONVENTION_INDEX_RE.match(stem)
                 if match and match.group(1).upper() == letter:
-                    used.add(int(match.group(2)) if match.group(2) else 1)
+                    used.add(int(match.group(2)))
+                elif stem.upper() == letter:
+                    used.add(1)
         number = 1
         while number in used:
             number += 1
         return f"{letter}_{number}"
+
+    def rename_roi(self, roi_node, new_name: str) -> str:
+        """Set the ROI display name from the table; empty names fall back to the previous name."""
+        text = re.sub(r"\s+", " ", (new_name or "").strip())
+        if not text:
+            text = roi_node.GetName() or self._next_convention_name(
+                self._roi_letter(roi_node) or DEFAULT_FINDING_LETTER, exclude=roi_node
+            )
+        roi_node.SetName(text)
+        return text
 
     def _preserved_source_filename(self, roi_node) -> Optional[str]:
         try:
@@ -854,21 +993,112 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             return name
         return None
 
+    def set_roi_finding(self, roi_node, letter: str) -> str:
+        """Change the finding type without renaming the box."""
+        letter = (letter or "").upper()
+        if letter and letter not in FINDING_LABEL_BY_LETTER:
+            letter = ""
+        roi_node.SetAttribute(ROI_ATTR_LETTER, letter)
+        roi_node.SetAttribute(ROI_ATTR_CONVENTION, "1" if letter else "0")
+        roi_node.SetAttribute(ROI_ATTR_FINDING_TEXT, FINDING_LABEL_BY_LETTER.get(letter, ""))
+        self._write_finding_onto_roi(roi_node)
+        return letter
+
+    def set_roi_finding_text(self, roi_node, text: str) -> str:
+        """Set a typed finding label. Known names/letters map to R/A/O/S/L; anything else is kept as-is."""
+        raw = re.sub(r"\s+", " ", (text or "").strip())
+        if raw in ("", "—", "-"):
+            roi_node.SetAttribute(ROI_ATTR_LETTER, "")
+            roi_node.SetAttribute(ROI_ATTR_CONVENTION, "0")
+            roi_node.SetAttribute(ROI_ATTR_FINDING_TEXT, "")
+            self._write_finding_onto_roi(roi_node)
+            return ""
+
+        key = raw.lower().replace("-", " ").replace("_", " ")
+        letter = ""
+        aliases = {
+            "r": "R",
+            "pm nodule": "R",
+            "pm nodules": "R",
+            "pm confluent": "R",
+            "peritoneal deposit": "R",
+            "a": "A",
+            "ascites": "A",
+            "o": "O",
+            "omental cake": "O",
+            "s": "S",
+            "stranding": "S",
+            "fat stranding": "S",
+            "l": "L",
+            "lymph node": "L",
+            "lymph nodes": "L",
+            "lymphadenopathy": "L",
+        }
+        letter = aliases.get(key, "")
+        if not letter:
+            for known_letter, label, class_id in FINDING_TYPES:
+                if key == label.lower() or key == class_id.replace("_", " "):
+                    letter = known_letter
+                    break
+
+        if letter:
+            roi_node.SetAttribute(ROI_ATTR_LETTER, letter)
+            roi_node.SetAttribute(ROI_ATTR_CONVENTION, "1")
+            roi_node.SetAttribute(ROI_ATTR_FINDING_TEXT, FINDING_LABEL_BY_LETTER[letter])
+            self._write_finding_onto_roi(roi_node)
+            return self.finding_label(roi_node)
+
+        roi_node.SetAttribute(ROI_ATTR_LETTER, "")
+        roi_node.SetAttribute(ROI_ATTR_CONVENTION, "0")
+        roi_node.SetAttribute(ROI_ATTR_FINDING_TEXT, raw)
+        self._write_finding_onto_roi(roi_node)
+        return raw
+
     def finding_label(self, roi_node) -> str:
-        if not self._uses_convention(roi_node):
-            return "—"
+        try:
+            custom = str(roi_node.GetAttribute(ROI_ATTR_FINDING_TEXT) or "").strip()
+        except Exception:
+            custom = ""
         letter = self._roi_letter(roi_node)
-        label = FINDING_LABEL_BY_LETTER.get(letter, "PM nodule")
-        if letter == "R" and self.is_roi_valid(roi_node):
-            max_dim = max(roi_node.GetSize())
-            if max_dim >= PM_CONFLUENT_THRESHOLD_MM:
-                return "PM confluent (size >= 30mm)"
-        return label
+        if letter:
+            label = FINDING_LABEL_BY_LETTER.get(letter, "PM nodule")
+            if letter == "R" and self.is_roi_valid(roi_node):
+                max_dim = max(roi_node.GetSize())
+                if max_dim >= PM_CONFLUENT_THRESHOLD_MM:
+                    return "PM confluent (size >= 30mm)"
+            return label
+        if custom:
+            return custom
+        return ""
+
+    def finding_text_for_save(self, roi_node) -> str:
+        """Finding text stored with the ROI (typed note or canonical label)."""
+        try:
+            custom = str(roi_node.GetAttribute(ROI_ATTR_FINDING_TEXT) or "").strip()
+        except Exception:
+            custom = ""
+        if custom:
+            return custom
+        letter = self._roi_letter(roi_node)
+        if letter:
+            return FINDING_LABEL_BY_LETTER.get(letter, "")
+        return ""
+
+    def roi_annotation_dict(self, roi_node) -> Dict[str, str]:
+        return {
+            "finding": self.finding_text_for_save(roi_node),
+            "finding_letter": self._roi_letter(roi_node),
+            "software_class": self.software_class_for_roi(roi_node),
+        }
 
     def software_class_for_roi(self, roi_node) -> str:
-        if not self._uses_convention(roi_node):
-            return "existing"
         letter = self._roi_letter(roi_node)
+        if not letter:
+            try:
+                custom = str(roi_node.GetAttribute(ROI_ATTR_FINDING_TEXT) or "").strip()
+            except Exception:
+                custom = ""
+            return custom or "existing"
         if letter == "R" and self.is_roi_valid(roi_node):
             if max(roi_node.GetSize()) >= PM_CONFLUENT_THRESHOLD_MM:
                 return "pm_confluent"
@@ -887,6 +1117,7 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         roi_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsROINode", node_name)
         roi_node.SetAttribute(ROI_ATTR_LETTER, letter)
         roi_node.SetAttribute(ROI_ATTR_CONVENTION, "1")
+        roi_node.SetAttribute(ROI_ATTR_FINDING_TEXT, FINDING_LABEL_BY_LETTER.get(letter, ""))
         self._configure_roi_display(roi_node)
         self.current_roi_nodes.append(roi_node)
         roi_node.SetName(node_name)
@@ -984,38 +1215,24 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
         reserved_names: set = set()
         save_plan: List[Tuple[Any, str]] = []
         for roi in valid_rois:
-            if self._uses_convention(roi):
-                letter = self._roi_letter(roi) or DEFAULT_FINDING_LETTER
-                roi.SetAttribute(ROI_ATTR_LETTER, letter)
-                roi.SetAttribute(ROI_ATTR_CONVENTION, "1")
-                current_name = roi.GetName() or ""
-                match = MARKUP_NAME_RE.match(current_name)
-                filename = f"{current_name}.mrk.json"
-                if (
-                    not match
-                    or match.group(1).upper() != letter
-                    or filename in reserved_names
-                ):
-                    current_name = self._next_convention_name(
-                        letter, exclude=roi, reserved_filenames=reserved_names
-                    )
-                    roi.SetName(current_name)
-                    filename = f"{current_name}.mrk.json"
-                reserved_names.add(filename)
-                save_plan.append((roi, filename))
-            else:
-                filename = self._preserved_source_filename(roi)
-                if not filename:
-                    filename = f"{roi.GetName()}.mrk.json"
-                if filename in reserved_names:
-                    stem = markup_stem(filename)
-                    suffix = 2
-                    while f"{stem}_{suffix}.mrk.json" in reserved_names:
-                        suffix += 1
-                    filename = f"{stem}_{suffix}.mrk.json"
-                reserved_names.add(filename)
-                roi.SetAttribute(ROI_ATTR_SOURCE_FILE, filename)
-                save_plan.append((roi, filename))
+            current_name = (roi.GetName() or "").strip()
+            if not current_name:
+                source = self._preserved_source_filename(roi)
+                current_name = markup_stem(source) if source else self._next_convention_name(
+                    self._roi_letter(roi) or DEFAULT_FINDING_LETTER, exclude=roi
+                )
+                roi.SetName(current_name)
+            filename = safe_markup_filename(current_name)
+            if filename in reserved_names:
+                stem = markup_stem(filename)
+                suffix = 2
+                while f"{stem}_{suffix}.mrk.json" in reserved_names:
+                    suffix += 1
+                filename = f"{stem}_{suffix}.mrk.json"
+                roi.SetName(markup_stem(filename))
+            reserved_names.add(filename)
+            roi.SetAttribute(ROI_ATTR_SOURCE_FILE, filename)
+            save_plan.append((roi, filename))
 
         for old_file in case_dir.glob("*.mrk.json"):
             if old_file.name in reserved_names:
@@ -1027,13 +1244,18 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
 
         saved_filenames: List[str] = []
         box_classes: Dict[str, str] = {}
+        box_findings: Dict[str, str] = {}
         for roi, filename in save_plan:
             target_file = case_dir / filename
+            self._write_finding_onto_roi(roi)
             saved = slicer.util.saveNode(roi, str(target_file))
             if not saved:
                 raise RuntimeError(f"Failed to save bounding box to: {target_file}")
+            annotation = self.roi_annotation_dict(roi)
+            self._embed_annotation_in_mrk_json(target_file, annotation)
             saved_filenames.append(target_file.name)
-            box_classes[target_file.name] = self.software_class_for_roi(roi)
+            box_classes[target_file.name] = annotation["software_class"]
+            box_findings[target_file.name] = annotation["finding"]
 
         # Write completion marker JSON
         now_utc = (
@@ -1052,6 +1274,7 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             "num_boxes": len(valid_rois),
             "box_files": saved_filenames,
             "box_classes": box_classes,
+            "box_findings": box_findings,
             "notes": str(notes).strip(),
             "format_version": 1,
         }
@@ -1384,9 +1607,9 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         # Workflow hint
         hint_label = qt.QLabel(
             "Workflow: Choose a finding type (PM nodule is default), press 'B', then click and drag "
-            "in any slice. Files are saved as R_1.mrk.json, A_1.mrk.json, … . Use the large "
-            "thickness buttons to switch series; if a thickness has no native COR/SAG, those views "
-            "show reconstructions of the current axial volume."
+            "in any slice. New boxes start as R_1, A_1, … ; double-click the Name cell to rename any "
+            "box, and type in the Finding cell to set or change its type. Use the large thickness buttons to switch series; if a thickness "
+            "has no native COR/SAG, those views show reconstructions of the current axial volume."
         )
         hint_label.setWordWrap(True)
         hint_label.setStyleSheet("color: #666; font-size: 11px; padding: 2px;")
@@ -1467,6 +1690,7 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         self.delete_box_button.clicked.connect(self.on_delete_box_clicked)
         self.delete_all_button.clicked.connect(self.on_delete_all_clicked)
         self.box_table.itemSelectionChanged.connect(self.on_box_table_selection_changed)
+        self.box_table.itemChanged.connect(self.on_box_table_item_changed)
 
     def cleanup(self):
         if self.shortcut_b:
@@ -1700,6 +1924,8 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
 
     def refresh_box_table(self):
         """Populate the table widget with current ROI nodes and dimensions."""
+        was_updating = self._updating_ui
+        self._updating_ui = True
         self.box_table.setRowCount(0)
         for idx, roi in enumerate(self.logic.current_roi_nodes):
             self.box_table.insertRow(idx)
@@ -1707,19 +1933,48 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
             name = roi.GetName() if roi else f"R_{idx + 1}"
             name_item = qt.QTableWidgetItem(name)
             name_item.setData(qt.Qt.UserRole, roi)
+            name_item.setToolTip("Double-click to rename this box. The filename follows this name on save.")
 
-            finding_text = self.logic.finding_label(roi) if roi else "PM nodule"
             size_text = "(not placed)"
             if roi and self.logic.is_roi_valid(roi):
                 size = roi.GetSize()
                 size_text = f"{size[0]:.1f} × {size[1]:.1f} × {size[2]:.1f}"
 
-            finding_item = qt.QTableWidgetItem(finding_text)
+            finding_item = qt.QTableWidgetItem(self.logic.finding_label(roi) if roi else "")
+            finding_item.setToolTip(
+                "Double-click to type a finding (e.g. PM nodule, ascites, or any free text)."
+            )
+
             size_item = qt.QTableWidgetItem(size_text)
+            size_item.setFlags(size_item.flags() & ~qt.Qt.ItemIsEditable)
 
             self.box_table.setItem(idx, 0, name_item)
             self.box_table.setItem(idx, 1, finding_item)
             self.box_table.setItem(idx, 2, size_item)
+        self._updating_ui = was_updating
+
+    def on_box_table_item_changed(self, item) -> None:
+        if self._updating_ui or item is None:
+            return
+        name_item = self.box_table.item(item.row(), 0)
+        roi_node = name_item.data(qt.Qt.UserRole) if name_item else None
+        if not roi_node:
+            return
+        if item.column() == 0:
+            new_name = self.logic.rename_roi(roi_node, item.text())
+            self._updating_ui = True
+            item.setText(new_name)
+            self._updating_ui = False
+            self.set_status(f"Box name is now '{new_name}'.")
+            return
+        if item.column() == 1:
+            label = self.logic.set_roi_finding_text(roi_node, item.text())
+            self._updating_ui = True
+            item.setText(label)
+            self._updating_ui = False
+            self.set_status(
+                f"Finding for '{roi_node.GetName()}' is now '{label or '—'}'."
+            )
 
     def on_box_table_selection_changed(self):
         """When an ROI row is selected in the table, jump slice viewers to its center."""
