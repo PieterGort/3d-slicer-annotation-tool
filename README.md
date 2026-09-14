@@ -17,6 +17,7 @@ A streamlined 3D Slicer extension designed for radiologists to quickly navigate 
 - **Notes & PCI Score Support:** Field to record PCI scores or clinical observations stored alongside the annotations in `_annotation_done.json`.
 - **Skip Completed Cases:** Automatically resumes where you left off; uncheck the option anytime to review prior cases.
 - **Click-to-Jump:** Selecting any box in the table automatically centers all orthogonal slice viewers (Axial, Sagittal, Coronal) on that box.
+- **Per-box visibility:** Each row in the box table has a **Show** checkbox to hide or show that bounding box in the views while inspecting the scan. Hidden boxes are still saved.
 
 ---
 
@@ -46,6 +47,7 @@ If you prefer to start Slicer normally from your desktop or Start Menu without a
 1. Open 3D Slicer.
 2. In the top menu, go to **Edit** > **Application Settings** > **Modules**.
 3. Under **Additional module paths**, click **Add** and select the `BoundingBoxNavigator` directory inside the extracted tool.
+   *Tip: if the settings window is small, the **Add** button is hidden behind a `>>` button to the right of the **Additional module paths** box; click `>>` to reveal it.*
 4. *(Optional & Recommended)*: In the same settings page, set **Default module** to **Bounding Box Navigator**. That way, every time you start Slicer, it opens straight into your annotation tool!
 5. Click **OK** and restart Slicer when prompted.
 6. The module is now permanently installed. You can also find it anytime in the module dropdown under **Annotation** > **Bounding Box Navigator**.
@@ -74,7 +76,8 @@ If **BoundingBoxNavigator** did not open automatically on startup:
 3. In any 2D slice view (Red, Yellow, or Green), **click and drag** across the lesion to define its initial bounds.
 4. Use the colored 3D handles on the box to resize or move the box in all three dimensions.
 5. If a scan has multiple lesions, repeat (press **`B`** for each additional lesion).
-6. To delete a box, select it in the table and click **✖ Delete Selected**.
+6. To temporarily hide a box (e.g. to inspect the tissue underneath), untick its **Show** checkbox in the table; tick it again to show it. Hidden boxes are still saved, and all boxes are shown again when a case is (re)loaded.
+7. To delete a box, select it in the table and click **✖ Delete Selected**.
 
 ### 3. Record Notes / PCI Score
 - In the **Notes / PCI:** field, optionally type the case's PCI score or comments (e.g. `PCI score 3, localized`).

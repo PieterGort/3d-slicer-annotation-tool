@@ -1134,6 +1134,31 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
 
         return roi_node
 
+    def is_roi_visible(self, roi_node: slicer.vtkMRMLMarkupsROINode) -> bool:
+        """Whether the box is currently shown in the slice/3D views."""
+        if roi_node is None:
+            return False
+        display_node = roi_node.GetDisplayNode()
+        if display_node is None:
+            return True
+        try:
+            return bool(display_node.GetVisibility())
+        except Exception:
+            return True
+
+    def set_roi_visibility(self, roi_node: slicer.vtkMRMLMarkupsROINode, visible: bool) -> None:
+        """
+        Show or hide a single box in all views. Hidden boxes stay in the case and
+        are still saved; visibility is only a viewing aid and is reset on reload.
+        """
+        if roi_node is None:
+            return
+        roi_node.CreateDefaultDisplayNodes()
+        display_node = roi_node.GetDisplayNode()
+        if display_node is None:
+            return
+        display_node.SetVisibility(bool(visible))
+
     def delete_roi_node(self, roi_node: slicer.vtkMRMLMarkupsROINode) -> None:
         """Remove a bounding box node from scene and tracking list."""
         if roi_node in self.current_roi_nodes:
@@ -1418,6 +1443,12 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
 class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
     """GUI widget for Bounding Box Navigator in Slicer."""
 
+    # Box table column indices
+    COL_VISIBLE = 0
+    COL_NAME = 1
+    COL_FINDING = 2
+    COL_SIZE = 3
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.logic = BoundingBoxNavigatorLogic()
@@ -1588,9 +1619,13 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         box_layout.addLayout(box_actions_row)
 
         # Box Table Widget
-        self.box_table = qt.QTableWidget(0, 3)
-        self.box_table.setHorizontalHeaderLabels(["Name", "Finding", "Size (W × L × H mm)"])
+        # Columns: 0 = Show (visibility checkbox), 1 = Name, 2 = Finding, 3 = Size
+        self.box_table = qt.QTableWidget(0, 4)
+        self.box_table.setHorizontalHeaderLabels(["Show", "Name", "Finding", "Size (W × L × H mm)"])
         self.box_table.horizontalHeader().setStretchLastSection(True)
+        self.box_table.horizontalHeader().setSectionResizeMode(
+            self.COL_VISIBLE, qt.QHeaderView.ResizeToContents
+        )
         self.box_table.setSelectionBehavior(qt.QAbstractItemView.SelectRows)
         self.box_table.setSelectionMode(qt.QAbstractItemView.SingleSelection)
         self.box_table.setFixedHeight(140)
@@ -1608,8 +1643,10 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         hint_label = qt.QLabel(
             "Workflow: Choose a finding type (PM nodule is default), press 'B', then click and drag "
             "in any slice. New boxes start as R_1, A_1, … ; double-click the Name cell to rename any "
-            "box, and type in the Finding cell to set or change its type. Use the large thickness buttons to switch series; if a thickness "
-            "has no native COR/SAG, those views show reconstructions of the current axial volume."
+            "box, and type in the Finding cell to set or change its type. Untick 'Show' to hide a box "
+            "while you inspect the scan (hidden boxes are still saved). Use the large thickness buttons "
+            "to switch series; if a thickness has no native COR/SAG, those views show reconstructions "
+            "of the current axial volume."
         )
         hint_label.setWordWrap(True)
         hint_label.setStyleSheet("color: #666; font-size: 11px; padding: 2px;")
@@ -1930,6 +1967,17 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         for idx, roi in enumerate(self.logic.current_roi_nodes):
             self.box_table.insertRow(idx)
 
+            visible_item = qt.QTableWidgetItem("")
+            visible_item.setFlags(
+                qt.Qt.ItemIsUserCheckable | qt.Qt.ItemIsEnabled | qt.Qt.ItemIsSelectable
+            )
+            is_visible = self.logic.is_roi_visible(roi) if roi else True
+            visible_item.setCheckState(qt.Qt.Checked if is_visible else qt.Qt.Unchecked)
+            visible_item.setToolTip(
+                "Tick to show this box in the views, untick to hide it. "
+                "Hidden boxes are still saved with the case."
+            )
+
             name = roi.GetName() if roi else f"R_{idx + 1}"
             name_item = qt.QTableWidgetItem(name)
             name_item.setData(qt.Qt.UserRole, roi)
@@ -1948,26 +1996,40 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
             size_item = qt.QTableWidgetItem(size_text)
             size_item.setFlags(size_item.flags() & ~qt.Qt.ItemIsEditable)
 
-            self.box_table.setItem(idx, 0, name_item)
-            self.box_table.setItem(idx, 1, finding_item)
-            self.box_table.setItem(idx, 2, size_item)
+            self.box_table.setItem(idx, self.COL_VISIBLE, visible_item)
+            self.box_table.setItem(idx, self.COL_NAME, name_item)
+            self.box_table.setItem(idx, self.COL_FINDING, finding_item)
+            self.box_table.setItem(idx, self.COL_SIZE, size_item)
         self._updating_ui = was_updating
+
+    def _roi_for_row(self, row: int):
+        """Return the ROI node stored on the Name cell of a table row, or None."""
+        if row < 0 or row >= self.box_table.rowCount:
+            return None
+        name_item = self.box_table.item(row, self.COL_NAME)
+        return name_item.data(qt.Qt.UserRole) if name_item else None
 
     def on_box_table_item_changed(self, item) -> None:
         if self._updating_ui or item is None:
             return
-        name_item = self.box_table.item(item.row(), 0)
-        roi_node = name_item.data(qt.Qt.UserRole) if name_item else None
+        roi_node = self._roi_for_row(item.row())
         if not roi_node:
             return
-        if item.column() == 0:
+        column = item.column()
+        if column == self.COL_VISIBLE:
+            visible = item.checkState() == qt.Qt.Checked
+            self.logic.set_roi_visibility(roi_node, visible)
+            state = "shown" if visible else "hidden"
+            self.set_status(f"Box '{roi_node.GetName()}' is now {state}.")
+            return
+        if column == self.COL_NAME:
             new_name = self.logic.rename_roi(roi_node, item.text())
             self._updating_ui = True
             item.setText(new_name)
             self._updating_ui = False
             self.set_status(f"Box name is now '{new_name}'.")
             return
-        if item.column() == 1:
+        if column == self.COL_FINDING:
             label = self.logic.set_roi_finding_text(roi_node, item.text())
             self._updating_ui = True
             item.setText(label)
@@ -1981,11 +2043,9 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         selected_rows = self.box_table.selectedItems()
         if not selected_rows:
             return
-        item = self.box_table.item(selected_rows[0].row(), 0)
-        if item:
-            roi_node = item.data(qt.Qt.UserRole)
-            if roi_node and self.logic.is_roi_valid(roi_node):
-                self.logic.jump_to_roi(roi_node)
+        roi_node = self._roi_for_row(selected_rows[0].row())
+        if roi_node and self.logic.is_roi_valid(roi_node):
+            self.logic.jump_to_roi(roi_node)
 
     def on_case_combobox_changed(self, combo_idx: int):
         if self._updating_ui:
@@ -2017,14 +2077,11 @@ class BoundingBoxNavigatorWidget(ScriptedLoadableModuleWidget):
         if not selected_items:
             self.set_status("Select a bounding box in the table to delete.")
             return
-        row = selected_items[0].row()
-        item = self.box_table.item(row, 0)
-        if item:
-            roi_node = item.data(qt.Qt.UserRole)
-            if roi_node:
-                self.logic.delete_roi_node(roi_node)
-                self.refresh_box_table()
-                self.set_status("Deleted selected bounding box.")
+        roi_node = self._roi_for_row(selected_items[0].row())
+        if roi_node:
+            self.logic.delete_roi_node(roi_node)
+            self.refresh_box_table()
+            self.set_status("Deleted selected bounding box.")
 
     def on_delete_all_clicked(self):
         """Delete all bounding boxes for current case."""

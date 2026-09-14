@@ -29,15 +29,15 @@
     \item Open \textbf{3D Slicer}.
     \item In the menu, go to \textbf{Edit} $\rightarrow$ \textbf{Application Settings} $\rightarrow$ \textbf{Modules}.
     \item Under \textbf{Additional module paths}, click \textbf{Add} and select the \textbf{\texttt{BoundingBoxNavigator}} folder.
-    \item \textit{(Recommended)} Set \textbf{Default module} to \textbf{\texttt{BoundingBoxNavigator}} so it opens automatically on startup.
+    \textit{Tip:} if the settings window is small, the \textbf{Add} button is hidden behind a \textbf{\texttt{>{}>}} button to the right of the \textbf{Additional module paths} box; click \textbf{\texttt{>{}>}} to reveal it.
     \item Click \textbf{OK} and restart Slicer.
 \end{enumerate}
 
 \subsection*{How to Annotate}
 \begin{enumerate}[leftmargin=1.5em, itemsep=3pt, topsep=1.5pt]
-    \item \textbf{Open the Module (if panel is not visible)}
+    \item \textbf{Open the Module}
     \begin{itemize}[leftmargin=1.2em, itemsep=0.5pt]
-        \item If not opened automatically on startup, go to: \textbf{Modules} $\rightarrow$ \textbf{Annotation} $\rightarrow$ \textbf{BoundingBoxNavigator} in the top toolbar to display the panel on the right.
+        \item In the top toolbar, go to: \textbf{Modules} $\rightarrow$ \textbf{Annotation} $\rightarrow$ \textbf{Bounding Box Navigator} to display the panel on the right.
     \end{itemize}
 
     \item \textbf{Select Folders \& Scan}
@@ -55,6 +55,7 @@
         \item Scroll through slices with your mouse wheel to check coverage.
         \item Use the large \textbf{slice thickness} buttons (3\,mm, TS, \ldots). For TS (or any thickness without native COR/SAG), coronal and sagittal show reconstructions of that axial scan.
         \item Press \textbf{\fbox{\textbf{B}}} again for each additional lesion.
+        \item \textit{To hide or show a box}: untick / tick the \textbf{Show} checkbox in front of it in the box list. Hidden boxes are still saved; this only hides them while you look at the scan.
         \item \textit{To remove a box}: click it in the list and press \textbf{Delete Selected}.
     \end{itemize}
 
@@ -86,6 +87,7 @@
 \textbf{Middle Click + Drag} & Pan view \\
 \textbf{Right Click + Drag} & Zoom in / out \\
 \textbf{Click row in box table} & Centers all slice views on that lesion \\
+\textbf{Show checkbox (box table)} & Hide / show that bounding box in the views; hidden boxes are still saved \\
 \textbf{Skip completed (checkbox)} & Checked by default. Uncheck to browse or edit past cases \\
 \textbf{Slice thickness buttons} & Switch 3\,mm / TS / other; COR/SAG reconstruct from axial if needed \\
 \textbf{Finding type} & PM nodule (R) default; also ascites, omental cake, stranding, lymph node \\
