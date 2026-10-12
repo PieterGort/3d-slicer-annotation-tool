@@ -13,7 +13,7 @@
 \definecolor{darkblue}{RGB}{0, 68, 136}
 
 \titleformat*{\subsection}{\normalsize\bfseries}
-\titlespacing*{\subsection}{0pt}{9pt}{2pt}
+\titlespacing*{\subsection}{0pt}{6pt}{1pt}
 
 \pagestyle{empty} % Clean 1-page quick reference
 
@@ -24,7 +24,7 @@
 
 \vspace{0.05cm}
 \subsection*{First-Time Setup}
-\begin{enumerate}[leftmargin=1.5em, itemsep=1pt, topsep=1.5pt]
+\begin{enumerate}[leftmargin=1.5em, itemsep=0.5pt, topsep=1pt]
     \item \textbf{Extract the ZIP}: Right-click the downloaded zip file $\rightarrow$ \textbf{Extract All...}
     \item Open \textbf{3D Slicer}.
     \item In the menu, go to \textbf{Edit} $\rightarrow$ \textbf{Application Settings} $\rightarrow$ \textbf{Modules}.
@@ -32,9 +32,10 @@
     \textit{Tip:} if the settings window is small, the \textbf{Add} button is hidden behind a \textbf{\texttt{>{}>}} button to the right of the \textbf{Additional module paths} box; click \textbf{\texttt{>{}>}} to reveal it.
     \item Click \textbf{OK} and restart Slicer.
 \end{enumerate}
+{\footnotesize\noindent\textbf{macOS:} Drag Slicer from the disk image into \textbf{Applications} (do not run it from the disk image). The first time, right-click Slicer $\rightarrow$ \textbf{Open} $\rightarrow$ \textbf{Open}. Move this tool's folder to your home folder (Finder: Cmd+Shift+H), not Downloads, Desktop, or Documents, or the module disappears after a restart. Then double-click \texttt{launch\_mac.command}.\par}
 
 \subsection*{How to Annotate}
-\begin{enumerate}[leftmargin=1.5em, itemsep=3pt, topsep=1.5pt]
+\begin{enumerate}[leftmargin=1.5em, itemsep=1.5pt, topsep=1pt]
     \item \textbf{Open the Module}
     \begin{itemize}[leftmargin=1.2em, itemsep=0.5pt]
         \item In the top toolbar, go to: \textbf{Modules} $\rightarrow$ \textbf{Annotation} $\rightarrow$ \textbf{Bounding Box Navigator} to display the panel on the right.
@@ -77,7 +78,7 @@
 \subsection*{Mouse \& Keyboard Shortcuts}
 \begin{center}
 \small
-\renewcommand{\arraystretch}{1.18}
+\renewcommand{\arraystretch}{1.08}
 \begin{tabular}{ll}
 \toprule
 \textbf{Shortcut / Control} & \textbf{Action} \\

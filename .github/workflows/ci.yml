@@ -24,3 +24,4 @@ jobs:
       - name: Validate Bash script syntax
         run: |
           bash -n launch_linux.sh
+          bash -n launch_mac.command

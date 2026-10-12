@@ -3,6 +3,7 @@
 
 # Ensure Linux/Unix shell scripts always preserve LF line endings
 *.sh text eol=lf
+*.command text eol=lf
 
 # Ensure Windows batch files always use CRLF line endings
 *.bat text eol=crlf

@@ -9,7 +9,7 @@ A streamlined 3D Slicer extension designed for radiologists to quickly navigate 
 ## Key Features
 
 - **Fast Case-by-Case Navigation:** Step sequentially through a cohort of scans with one click (`Save + Next`).
-- **Native AX / COR / SAG views:** Files named `{case_id}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz` are grouped into one case. Each viewer shows the original acquisition when that plane exists.
+- **Native AX / COR / SAG views:** Files named `{case_id}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz`, or `{case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz`, are grouped into one case. A scan number is part of the case folder (`1001` and `1001_2` stay separate, including when both names sit in the same folder). Each viewer shows the original acquisition when that plane exists.
 - **Slice-thickness buttons:** Large buttons switch 3 mm, TS, or any other axial thickness (2 mm, 5 mm, …). If that thickness has no native COR/SAG, those views show reconstructions of the current axial volume.
 - **Missing-plane fallback:** If AX, COR, or SAG is missing, a warning is shown and COR/SAG are reconstructed from the axial scan (a case with no axial file is skipped).
 - **Finding-type naming:** Dropdown (default **PM nodule**) saves `R_1.mrk.json`, `A_1.mrk.json`, `O_1.mrk.json`, `S_1.mrk.json`, `L_1.mrk.json`. R boxes ≥ 30 mm become `pm_confluent` automatically.
@@ -37,10 +37,16 @@ A streamlined 3D Slicer extension designed for radiologists to quickly navigate 
 
 ## Launching the Tool
 
-### Option A: Double-Click the Launcher
-Inside the extracted folder, double-click **`launch_windows.bat`**.
-- It automatically detects your Slicer installation (including Start Menu shortcuts), pre-loads the module, and opens Slicer directly into **Bounding Box Navigator**.
-- *(On Linux, run `./launch_linux.sh`)*.
+### Option A: Use the launcher
+Inside the extracted folder:
+- **Windows:** double-click **`launch_windows.bat`**. It also checks Start Menu shortcuts for Slicer.
+- **macOS:** double-click **`launch_mac.command`**. Two placements matter, or the module disappears after a restart:
+  1. Install Slicer by dragging it from the disk image into **Applications**. The first time, right-click Slicer and choose **Open**, then **Open**. macOS blocks apps from outside the App Store until you do this once. Do not run Slicer from the disk image or from Downloads.
+  2. Move the extracted tool folder into your home folder (Finder: **Cmd+Shift+H**). Not into Downloads, Desktop, or Documents: macOS protects those folders, so Slicer cannot keep the module.
+  If macOS blocks `launch_mac.command` itself, right-click it and choose **Open**. The launcher stops with these same steps if Slicer or the module folder is in the wrong place.
+- **Linux:** run `./launch_linux.sh`.
+
+The launcher finds 3D Slicer, loads this module, and opens Slicer directly into **Bounding Box Navigator**.
 
 ### Option B: Manual 1-Time Setup inside 3D Slicer (Most Robust)
 If you prefer to start Slicer normally from your desktop or Start Menu without a batch file:
@@ -62,10 +68,10 @@ If **BoundingBoxNavigator** did not open automatically on startup:
 
 ### 1. Select Folders & Scan
 1. In the **1. Setup & Folders** section:
-   - **Input Scans Folder:** Choose the folder containing your CT scan volumes (`.nii.gz`, `.nii`, `.nrrd`, `.mha`). For the radiologist package, use files named `{case_id}_{AX|COR|SAG}_{phase}_{3mm|TS}.nii.gz`.
+   - **Input Scans Folder:** Choose the folder containing your CT scan volumes (`.nii.gz`, `.nii`, `.nrrd`, `.mha`). For the radiologist package, use files named `{case_id}_{AX|COR|SAG}_{phase}_{3mm|TS}.nii.gz` or `{case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{3mm|TS}.nii.gz`.
    - **Output Annotations Folder:** Choose where annotations should be saved.
 2. Click **Scan Folder**.
-   - Matching files are grouped into one case per `case_id` (e.g. all `1001_*.nii.gz` files become case 1001).
+   - Matching files are grouped into one case per case id. When the filename includes a scan number, that number is part of the case (e.g. `1001_AX_...` is case `1001`, and `1001_2_AX_...` is case `1001_2`). Both forms can sit in the same folder.
    - Cases are sorted naturally by case ID (e.g. case 1, 2, ..., 10).
    - The first unannotated case loads in Four-Up layout: **Red = original axial**, **Green = original coronal**, **Yellow = original sagittal**, with standard CT-Abdomen windowing (Window: 350, Level: 40).
    - Use the large **slice thickness** buttons to switch series (3 mm, TS, 2 mm, 5 mm, …). When a thickness has no native COR/SAG (typical for TS), coronal and sagittal show reconstructions of that axial volume.
@@ -99,7 +105,7 @@ If **BoundingBoxNavigator** did not open automatically on startup:
 
 ## Output Structure
 
-Inside your selected output folder, each case has its own folder named after its case ID:
+Inside your selected output folder, each case has its own folder named after its case ID. A scan number in the filename is included, so scan 2 of case 1001 is saved under `1001_2/`, not `1001/`:
 
 ```
 <Output_Folder>/
@@ -162,16 +168,20 @@ Place all volumes for a batch in one folder (subfolders are scanned recursively)
 
 ```
 {case_id}_{view plane}_{phase}_{slice thickness}.nii.gz
+{case_id}_{scan number}_{view plane}_{phase}_{slice thickness}.nii.gz
 ```
+
+The scan number is optional. A folder may contain only the first form, only the second, or both. Files that share a case id and scan number are one case; a missing scan number is its own case and is not merged with a numbered scan.
 
 | Token | Values | Role |
 | :--- | :--- | :--- |
-| `{case_id}` | e.g. `1001` | Groups files into one case |
+| `{case_id}` | e.g. `1001` | Patient / case id |
+| `{scan number}` | e.g. `2` (optional) | When present, the case and its bounding-box folder are named `{case_id}_{scan number}` (`1001_2`) |
 | `{view plane}` | `AX`, `COR`, `SAG` | Native acquisition shown in that slice viewer |
 | `{phase}` | e.g. `pvp` | Contrast phase (parsed, not used for grouping) |
 | `{slice thickness}` | `3mm`, `TS`, `2mm`, `5mm`, … | Default views prefer `3mm`; other axial thicknesses are offered as buttons |
 
-Example (cases 1001–1004; 1004 has no thin-slice axial):
+Example (case 1001 has an unnumbered scan and scan 2 in the same folder; 1004 has no thin-slice axial):
 
 ```
 scans/
@@ -179,6 +189,9 @@ scans/
 ├── 1001_AX_pvp_TS.nii.gz
 ├── 1001_COR_pvp_3mm.nii.gz
 ├── 1001_SAG_pvp_3mm.nii.gz
+├── 1001_2_AX_pvp_3mm.nii.gz
+├── 1001_2_COR_pvp_3mm.nii.gz
+├── 1001_2_SAG_pvp_3mm.nii.gz
 ├── 1002_AX_pvp_3mm.nii.gz
 ├── 1002_AX_pvp_TS.nii.gz
 ├── 1002_COR_pvp_3mm.nii.gz
@@ -188,6 +201,8 @@ scans/
 ├── 1004_COR_pvp_3mm.nii.gz
 └── 1004_SAG_pvp_3mm.nii.gz
 ```
+
+The unnumbered `1001_*` files are case `1001`. The `1001_2_*` files are a separate case, `1001_2`. Bounding boxes for each are saved in the matching output folder.
 
 Behaviour:
 - **Red (axial)** shows `*_AX_*_3mm` by default. Use the thickness buttons to load `*_AX_*_TS` (or 2 mm / 5 mm); those volumes are lazy-loaded.
@@ -201,7 +216,7 @@ The module automatically searches recursively for the following medical imaging 
 - NRRD: `.nrrd`, `.nhdr`
 - MetaImage: `.mha`, `.mhd`
 
-Filenames matching `{case_id}_{AX|COR|SAG}_{phase}_{3mm|TS}` are grouped per case. Unmatched names fall back to single-volume mode: the case ID is a 4- or 5-digit run in the filename (e.g. `patient_01234_CT.nii.gz` → `01234`), or the file stem if no digits are found. That single volume is shown in all three views (reconstructions in COR/SAG).
+Filenames matching `{case_id}_{AX|COR|SAG}_{phase}_{thickness}` or `{case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{thickness}` are grouped per case. Unmatched names fall back to single-volume mode: the case ID is a 4- or 5-digit run in the filename (e.g. `patient_01234_CT.nii.gz` → `01234`), or the file stem if no digits are found. That single volume is shown in all three views (reconstructions in COR/SAG).
 
 ---
 
@@ -211,6 +226,7 @@ Filenames matching `{case_id}_{AX|COR|SAG}_{phase}_{3mm|TS}` are grouped per cas
 ├── BoundingBoxNavigator/
 │   └── BoundingBoxNavigator.py   # 3D Slicer scripted loadable module
 ├── launch_windows.bat             # One-click Windows launcher (detects Slicer & opens module)
+├── launch_mac.command             # One-click macOS launcher (double-click in Finder)
 ├── launch_linux.sh                # One-click Linux launcher
 ├── how-to-use.pdf                 # Printable 1-page radiologist quick reference guide
 ├── how-to-use.tex                 # LaTeX source for the guide

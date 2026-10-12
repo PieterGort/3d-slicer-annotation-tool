@@ -72,9 +72,12 @@ SUPPORTED_EXTENSIONS = (
     ".mhd",
 )
 
-# {case_id}_{AX|COR|SAG}_{phase}_{3mm|TS}
+# {case_id}_{AX|COR|SAG}_{phase}_{thickness}
+# or {case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{thickness}
+# Both forms may appear in the same folder. The scan number, when present, is part
+# of the case key so each scan gets its own bounding-box folder (1001 vs 1001_2).
 SCAN_FILENAME_RE = re.compile(
-    r"^(?P<case_id>[^_]+)_(?P<plane>AX|COR|SAG)_(?P<phase>[^_]+)_(?P<thickness>[^_]+)$",
+    r"^(?P<base_id>[^_]+)(?:_(?P<scan_number>\d+))?_(?P<plane>AX|COR|SAG)_(?P<phase>[^_]+)_(?P<thickness>[^_]+)$",
     re.IGNORECASE,
 )
 
@@ -139,10 +142,40 @@ def volume_key(plane: str, thickness: str) -> str:
     return f"{plane.upper()}_{normalize_thickness(thickness)}"
 
 
+def case_key(base_id: str, scan_number: str = "") -> str:
+    """Folder and case name. Includes the scan number only when the filename has one."""
+    if scan_number:
+        return f"{base_id}_{scan_number}"
+    return base_id
+
+
+def name_contains_case_key(name: str, case_id: str) -> bool:
+    """
+    True when name contains case_id as its own token.
+    Case 1001 matches 'Scan 1001' and '1001_AX_...'. It does not match '1001_2' or '10012'.
+    Case 1001_2 matches '1001_2' and 'Scan 1001_2'.
+    """
+    if not case_id:
+        return False
+    return (
+        re.search(
+            rf"(?<!\d){re.escape(case_id)}(?!_\d)(?!\d)",
+            name,
+        )
+        is not None
+    )
+
+
 def parse_scan_filename(filename_or_path: Path | str) -> Optional[Dict[str, str]]:
     """
-    Parse {case_id}_{AX|COR|SAG}_{phase}_{thickness} from a volume filename.
-    Returns dict with case_id, plane, phase, thickness, volume_key, or None if unmatched.
+    Parse a volume filename.
+
+    Accepted forms (the scan number is optional; both may occur in one folder):
+      {case_id}_{AX|COR|SAG}_{phase}_{thickness}
+      {case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{thickness}
+
+    case_id in the result is the bounding-box folder name: '1001' or '1001_2'.
+    Returns None if the name does not match.
     """
     path = Path(filename_or_path)
     stem = get_clean_stem(path)
@@ -151,8 +184,12 @@ def parse_scan_filename(filename_or_path: Path | str) -> Optional[Dict[str, str]
         return None
     plane = match.group("plane").upper()
     thickness = normalize_thickness(match.group("thickness"))
+    base_id = match.group("base_id")
+    scan_number = match.group("scan_number") or ""
     return {
-        "case_id": match.group("case_id"),
+        "case_id": case_key(base_id, scan_number),
+        "base_id": base_id,
+        "scan_number": scan_number,
         "plane": plane,
         "phase": match.group("phase"),
         "thickness": thickness,
@@ -242,7 +279,10 @@ class BoundingBoxNavigator(ScriptedLoadableModule):
         self.parent.contributors = ["Pieter Gort"]
         self.parent.helpText = (
             "Navigate a folder of CT scans and annotate 3D bounding boxes (Markups ROI). "
-            "Files named {case_id}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz are grouped per case. "
+            "Files named {case_id}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz, or "
+            "{case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz, are grouped per case. "
+            "A scan number becomes part of the case folder name (1001_2). Names with and without "
+            "a scan number in the same folder stay separate cases. "
             "Native AX/COR/SAG volumes are shown when present; missing planes or a thickness "
             "without a native pair (e.g. TS) use reconstructions of the current axial volume. "
             "Boxes are saved as <letter>_<n>.mrk.json (R, A, O, S, L)."
@@ -279,7 +319,11 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
     ) -> Tuple[List[Dict[str, Any]], List[str]]:
         """
         Scan input directory recursively for supported medical volume files.
-        Groups {case_id}_{AX|COR|SAG}_{phase}_{thickness} files into one case.
+        Groups files into one case per case id, plus scan number when the filename has one.
+        Accepted names:
+          {case_id}_{AX|COR|SAG}_{phase}_{thickness}
+          {case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{thickness}
+        Both forms may appear in the same folder and stay separate cases (1001 vs 1001_2).
         Unmatched filenames fall back to legacy single-volume cases.
         """
         self.input_dir = Path(input_dir)
@@ -324,6 +368,8 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             if case_id not in grouped:
                 grouped[case_id] = {
                     "case_id": case_id,
+                    "base_id": parsed["base_id"],
+                    "scan_number": parsed["scan_number"],
                     "volumes": {},
                     "phase": parsed["phase"],
                 }
@@ -388,7 +434,8 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             case_records.append(
                 {
                     "case_id": case_id,
-                    "base_id": case_id,
+                    "base_id": rec.get("base_id", case_id),
+                    "scan_number": rec.get("scan_number") or "",
                     "volume_path": primary_path,
                     "filename": primary_path.name,
                     "volumes": volumes,
@@ -408,7 +455,9 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
     def get_case_output_dir(self, case_id: str) -> Optional[Path]:
         """
         Return the per-case output directory.
-        Prefers <output>/<case_id>, then folders like 'Scan 1001' that contain that id.
+        Prefers <output>/<case_id> (for example 1001 or 1001_2), then a folder
+        whose name contains that full case key, such as 'Scan 1001'.
+        Case 1001 does not match a folder named 1001_2.
         """
         if self.output_dir is None:
             return None
@@ -422,8 +471,9 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
                     continue
                 if child.name.lower() == case_id.lower():
                     return child
-                found = re.search(r"(?<!\d)\d{4,5}(?!\d)", child.name)
-                if found and found.group(0) == case_id:
+                # 'Scan 1001' matches case 1001. '1001_2' does not, and 'Scan 1001'
+                # does not match case 1001_2.
+                if name_contains_case_key(child.name, case_id):
                     matches.append(child)
             if len(matches) == 1:
                 return matches[0]
@@ -1336,7 +1386,7 @@ class BoundingBoxNavigatorLogic(ScriptedLoadableModuleLogic):
             raise ValueError(f"Segmentation path does not exist: {path}")
 
         if case_id:
-            matched = [p for p in files if case_id in p.name]
+            matched = [p for p in files if name_contains_case_key(p.name, case_id)]
             if matched:
                 return matched
             if require_case_match:
