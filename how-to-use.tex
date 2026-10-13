@@ -4,7 +4,7 @@
 \usepackage[scaled=0.92]{DejaVuSerif}
 \usepackage[scaled=0.90]{DejaVuSans}
 \usepackage[scaled=0.88]{DejaVuSansMono}
-\usepackage[margin=1.6cm,top=1.3cm,bottom=1.3cm]{geometry}
+\usepackage[margin=1.5cm,top=1.0cm,bottom=0.55cm]{geometry}
 \usepackage{enumitem}
 \usepackage{booktabs}
 \usepackage{titlesec}
@@ -13,29 +13,46 @@
 \definecolor{darkblue}{RGB}{0, 68, 136}
 
 \titleformat*{\subsection}{\normalsize\bfseries}
-\titlespacing*{\subsection}{0pt}{6pt}{1pt}
+\titlespacing*{\subsection}{0pt}{3pt}{0pt}
 
 \pagestyle{empty} % Clean 1-page quick reference
 
 \begin{document}
 
-{\Large\bfseries\color{darkblue} 3D Slicer Bounding Box Navigator} \hfill {\small\bfseries Quick User Guide}\\[-0.2cm]
+{\Large\bfseries\color{darkblue} 3D Slicer Bounding Box Navigator} \hfill {\small\bfseries User Guide}\\[-0.2cm]
 \rule{\textwidth}{0.8pt}
 
 \vspace{0.05cm}
-\subsection*{First-Time Setup}
-\begin{enumerate}[leftmargin=1.5em, itemsep=0.5pt, topsep=1pt]
-    \item \textbf{Extract the ZIP}: Right-click the downloaded zip file $\rightarrow$ \textbf{Extract All...}
+
+\textbf{Note:} Please install the latest version of 3D Slicer before you start.
+
+\vspace{0.05cm}
+\small
+\subsection*{Quick Setup}
+\begin{enumerate}[leftmargin=1.5em, itemsep=0pt, topsep=0.5pt, parsep=0pt]
+    \item \textbf{Download the ZIP} from \texttt{github.com/PieterGort/3d-slicer-annotation-tool}: \textbf{Code} $\rightarrow$ \textbf{Download ZIP}.
+    \item \textbf{Extract the ZIP.} On Windows and Linux, extract the zip file in Downloads. On macOS, extract the zip file in your home folder (Finder: Cmd+Shift+H). Don't extract in Downloads, Desktop, or Documents, or the module disappears after a restart.
+    \item \textbf{Open the launch file.}
+    \begin{itemize}[leftmargin=1.2em, itemsep=0pt, topsep=0pt, parsep=0pt]
+        \item \textbf{Windows:} double-click \texttt{launch\_windows.bat}.
+        \item \textbf{Linux:} run \texttt{./launch\_linux.sh}.
+        \item \textbf{macOS:} double-click \texttt{launch\_mac.command}. If macOS blocks it, right-click it, choose \textbf{Open}, and click \textbf{Open} in the warning dialog.
+    \end{itemize}
+\end{enumerate}
+
+\subsection*{Manual Setup}
+If the launch file did not open the module, add it inside Slicer once:
+\begin{enumerate}[leftmargin=1.2em, itemsep=0pt, topsep=0pt, parsep=0pt]
+    \item \textbf{Download the ZIP} from \texttt{github.com/PieterGort/3d-slicer-annotation-tool}: \textbf{Code} $\rightarrow$ \textbf{Download ZIP}.
+    \item \textbf{Extract the ZIP.} On Windows and Linux, extract the zip file in Downloads. On macOS, extract the zip file in your home folder (Finder: Cmd+Shift+H). Don't extract in Downloads, Desktop, or Documents, or the module disappears after a restart.
     \item Open \textbf{3D Slicer}.
     \item In the menu, go to \textbf{Edit} $\rightarrow$ \textbf{Application Settings} $\rightarrow$ \textbf{Modules}.
     \item Under \textbf{Additional module paths}, click \textbf{Add} and select the \textbf{\texttt{BoundingBoxNavigator}} folder.
-    \textit{Tip:} if the settings window is small, the \textbf{Add} button is hidden behind a \textbf{\texttt{>{}>}} button to the right of the \textbf{Additional module paths} box; click \textbf{\texttt{>{}>}} to reveal it.
     \item Click \textbf{OK} and restart Slicer.
 \end{enumerate}
-{\footnotesize\noindent\textbf{macOS:} Drag Slicer from the disk image into \textbf{Applications} (do not run it from the disk image). The first time, right-click Slicer $\rightarrow$ \textbf{Open} $\rightarrow$ \textbf{Open}. Move this tool's folder to your home folder (Finder: Cmd+Shift+H), not Downloads, Desktop, or Documents, or the module disappears after a restart. Then double-click \texttt{launch\_mac.command}.\par}
 
 \subsection*{How to Annotate}
-\begin{enumerate}[leftmargin=1.5em, itemsep=1.5pt, topsep=1pt]
+\begin{enumerate}[leftmargin=1.5em, itemsep=0pt, topsep=0.5pt, parsep=0pt]
     \item \textbf{Open the Module}
     \begin{itemize}[leftmargin=1.2em, itemsep=0.5pt]
         \item In the top toolbar, go to: \textbf{Modules} $\rightarrow$ \textbf{Annotation} $\rightarrow$ \textbf{Bounding Box Navigator} to display the panel on the right.
@@ -78,7 +95,7 @@
 \subsection*{Mouse \& Keyboard Shortcuts}
 \begin{center}
 \small
-\renewcommand{\arraystretch}{1.08}
+\renewcommand{\arraystretch}{1.02}
 \begin{tabular}{ll}
 \toprule
 \textbf{Shortcut / Control} & \textbf{Action} \\
@@ -96,7 +113,7 @@
 \end{tabular}
 \end{center}
 
-\vfill
+\vspace{0.08cm}
 \hrule
 \vspace{0.12cm}
 {\footnotesize\color{gray} Outputs: \texttt{<Output>/<case\_id>/R\_1.mrk.json} (or A/O/S/L) with summary in \texttt{\_annotation\_done.json}.}
