@@ -59,6 +59,13 @@ class UnsavedChangesGuard:
         self.case_combobox.setCurrentIndex(self.logic.current_index)
         self._updating_ui = was_updating
 
+    def _show_geometry_check(self) -> None:
+        """Pop up orientation, spacing, and box-visibility warnings for the views on screen."""
+        self._show_notice(
+            "Geometry check (the views may not line up with the boxes):",
+            self.logic.check_geometry(),
+        )
+
     def _show_notice(self, title: str, items: List[str]) -> None:
         """Show a pop-up with the items, or nothing when there are no items."""
         text = format_notice(title, items)

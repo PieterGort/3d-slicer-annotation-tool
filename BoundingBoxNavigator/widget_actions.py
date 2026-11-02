@@ -134,6 +134,7 @@ class WidgetActions:
             "These files in the case folder could not be used. They are kept unchanged on disk:",
             result.get("load_problems") or [],
         )
+        self._show_geometry_check()
 
     def _rebuild_thickness_buttons(self, case_info: Dict[str, Any]) -> None:
         while self.thickness_buttons_layout.count():
@@ -220,6 +221,7 @@ class WidgetActions:
         try:
             self.logic.set_slice_thickness(str(thickness))
             self._update_axial_file_label()
+            self._show_geometry_check()
             self._update_plane_warning(self.logic.load_warnings)
             if self.logic.cor_sag_are_reconstructions():
                 self.set_status(

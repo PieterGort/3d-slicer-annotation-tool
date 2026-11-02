@@ -78,6 +78,7 @@ class VolumeOps:
         self.current_axial_thickness = None
         self.axial_using_ts = False
         self.load_warnings = []
+        self.view_sources: Dict[str, Dict[str, Any]] = {}
 
         for seg_node in list(self.current_segmentation_nodes):
             self._remove_segmentation_node(seg_node)
@@ -234,6 +235,11 @@ class VolumeOps:
         self._assign_volume_to_view("Red", axial_node, fit=fit, reconstruct=False)
         self._assign_volume_to_view("Green", cor_node, fit=fit, reconstruct=cor_reconstruct)
         self._assign_volume_to_view("Yellow", sag_node, fit=fit, reconstruct=sag_reconstruct)
+        self.view_sources = {
+            "Red": self._view_source("AX", thickness, axial_node, reconstructed=False),
+            "Green": self._view_source("COR", thickness, cor_node, cor_reconstruct),
+            "Yellow": self._view_source("SAG", thickness, sag_node, sag_reconstruct),
+        }
 
         if preserve_offset:
             for view_name, offset in offsets.items():
@@ -242,6 +248,14 @@ class VolumeOps:
         self.current_axial_thickness = thickness
         self.axial_using_ts = thickness.upper() == "TS"
         return axial_node.GetName()
+
+    def _view_source(self, plane: str, thickness: str, node, reconstructed: bool) -> Dict[str, Any]:
+        """What a slice view draws. A reconstructed view draws the axial volume."""
+        if reconstructed:
+            return {"label": f"AX {thickness}", "plane": "AX", "thickness": thickness,
+                    "node": node, "reconstructed": True}
+        return {"label": f"{plane} {thickness}", "plane": plane, "thickness": thickness,
+                "node": node, "reconstructed": False}
 
     def find_segmentation_files(
         self,

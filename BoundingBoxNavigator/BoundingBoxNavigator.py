@@ -44,6 +44,7 @@ from markups import (
     plan_markup_files,
 )
 from session import filenames_to_delete
+from geometry_check import GeometryOps
 from volumes import VolumeOps
 
 MODULE_NAME = "BoundingBoxNavigator"
@@ -73,7 +74,7 @@ class BoundingBoxNavigator(ScriptedLoadableModule):
 
 
 
-class BoundingBoxNavigatorLogic(MarkupOps, VolumeOps, ScriptedLoadableModuleLogic):
+class BoundingBoxNavigatorLogic(MarkupOps, VolumeOps, GeometryOps, ScriptedLoadableModuleLogic):
     """Core logic for scanning directories, loading volumes, managing ROIs, and saving files."""
 
     def __init__(self):
@@ -93,6 +94,7 @@ class BoundingBoxNavigatorLogic(MarkupOps, VolumeOps, ScriptedLoadableModuleLogi
         self.load_problems: List[str] = []
         self.protected_markup_files: List[str] = []
         self.last_dropped_boxes: List[str] = []
+        self.view_sources: Dict[str, Dict[str, Any]] = {}
 
     def _warn(self, message: str) -> None:
         self.scan_warnings.append(message)
@@ -122,6 +124,7 @@ class BoundingBoxNavigatorLogic(MarkupOps, VolumeOps, ScriptedLoadableModuleLogi
         self.load_problems = []
         self.protected_markup_files = []
         self.last_dropped_boxes = []
+        self.view_sources = {}
         self.cases, self.scan_warnings = scan_input_dir(self.input_dir)
         return self.cases, self.scan_warnings
 

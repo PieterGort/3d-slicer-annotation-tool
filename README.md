@@ -12,6 +12,7 @@ A streamlined 3D Slicer extension designed for radiologists to quickly navigate 
 - **Native AX / COR / SAG views:** Files named `{case_id}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz`, or `{case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz`, are grouped into one case. A missing scan number means scan 1 (folder `1001`). Scan 2 and higher use their own folder (`1001_2`). Each viewer shows the original acquisition when that plane exists.
 - **Slice-thickness buttons:** Large buttons switch 3 mm, TS, or any other axial thickness (2 mm, 5 mm, …). If that thickness has no native COR/SAG, those views show reconstructions of the current axial volume.
 - **Missing-plane fallback:** If AX, COR, or SAG is missing, a warning is shown and COR/SAG are reconstructed from the axial scan (a case with no axial file is skipped).
+- **Geometry check:** On load and when you switch thickness, a pop-up lists orientation, spacing, or origin mismatches between the volumes of the case, and boxes that sit outside a reconstructed view.
 - **Finding-type naming:** Dropdown (default **PM nodule**) saves `R_1.mrk.json`, `A_1.mrk.json`, `O_1.mrk.json`, `S_1.mrk.json`, `L_1.mrk.json`. R boxes ≥ 30 mm become `pm_confluent` automatically.
 - **Segmentation overlay:** Panel 4 loads a `.seg.nrrd` file/folder, or a `.nii.gz` labelmap (forced as segmentation, not a CT volume).
 - **Notes & PCI Score Support:** Field to record PCI scores or clinical observations stored alongside the annotations in `_annotation_done.json`.
