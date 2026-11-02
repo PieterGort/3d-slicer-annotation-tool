@@ -4,7 +4,7 @@
 \usepackage[scaled=0.92]{DejaVuSerif}
 \usepackage[scaled=0.90]{DejaVuSans}
 \usepackage[scaled=0.88]{DejaVuSansMono}
-\usepackage[margin=1.5cm,top=1.0cm,bottom=0.55cm]{geometry}
+\usepackage[margin=1.6cm,top=1.3cm,bottom=1.3cm]{geometry}
 \usepackage{enumitem}
 \usepackage{booktabs}
 \usepackage{titlesec}
@@ -13,46 +13,29 @@
 \definecolor{darkblue}{RGB}{0, 68, 136}
 
 \titleformat*{\subsection}{\normalsize\bfseries}
-\titlespacing*{\subsection}{0pt}{3pt}{0pt}
+\titlespacing*{\subsection}{0pt}{6pt}{1pt}
 
-\pagestyle{empty} % Clean 1-page quick reference
+\pagestyle{empty} % Page 1 is the quick reference; the last page is the folder-layout guide
 
 \begin{document}
 
-{\Large\bfseries\color{darkblue} 3D Slicer Bounding Box Navigator} \hfill {\small\bfseries User Guide}\\[-0.2cm]
+{\Large\bfseries\color{darkblue} 3D Slicer Bounding Box Navigator} \hfill {\small\bfseries Quick User Guide}\\[-0.2cm]
 \rule{\textwidth}{0.8pt}
 
 \vspace{0.05cm}
-
-\textbf{Note:} Please install the latest version of 3D Slicer before you start.
-
-\vspace{0.05cm}
-\small
-\subsection*{Quick Setup}
-\begin{enumerate}[leftmargin=1.5em, itemsep=0pt, topsep=0.5pt, parsep=0pt]
-    \item \textbf{Download the ZIP} from \texttt{github.com/PieterGort/3d-slicer-annotation-tool}: \textbf{Code} $\rightarrow$ \textbf{Download ZIP}.
-    \item \textbf{Extract the ZIP.} On Windows and Linux, extract the zip file in Downloads. On macOS, extract the zip file in your home folder (Finder: Cmd+Shift+H). Don't extract in Downloads, Desktop, or Documents, or the module disappears after a restart.
-    \item \textbf{Open the launch file.}
-    \begin{itemize}[leftmargin=1.2em, itemsep=0pt, topsep=0pt, parsep=0pt]
-        \item \textbf{Windows:} double-click \texttt{launch\_windows.bat}.
-        \item \textbf{Linux:} run \texttt{./launch\_linux.sh}.
-        \item \textbf{macOS:} double-click \texttt{launch\_mac.command}. If macOS blocks it, right-click it, choose \textbf{Open}, and click \textbf{Open} in the warning dialog.
-    \end{itemize}
-\end{enumerate}
-
-\subsection*{Manual Setup}
-If the launch file did not open the module, add it inside Slicer once:
-\begin{enumerate}[leftmargin=1.2em, itemsep=0pt, topsep=0pt, parsep=0pt]
-    \item \textbf{Download the ZIP} from \texttt{github.com/PieterGort/3d-slicer-annotation-tool}: \textbf{Code} $\rightarrow$ \textbf{Download ZIP}.
-    \item \textbf{Extract the ZIP.} On Windows and Linux, extract the zip file in Downloads. On macOS, extract the zip file in your home folder (Finder: Cmd+Shift+H). Don't extract in Downloads, Desktop, or Documents, or the module disappears after a restart.
+\subsection*{First-Time Setup}
+\begin{enumerate}[leftmargin=1.5em, itemsep=0.5pt, topsep=1pt]
+    \item \textbf{Extract the ZIP}: Right-click the downloaded zip file $\rightarrow$ \textbf{Extract All...}
     \item Open \textbf{3D Slicer}.
     \item In the menu, go to \textbf{Edit} $\rightarrow$ \textbf{Application Settings} $\rightarrow$ \textbf{Modules}.
     \item Under \textbf{Additional module paths}, click \textbf{Add} and select the \textbf{\texttt{BoundingBoxNavigator}} folder.
+    \textit{Tip:} if the settings window is small, the \textbf{Add} button is hidden behind a \textbf{\texttt{>{}>}} button to the right of the \textbf{Additional module paths} box; click \textbf{\texttt{>{}>}} to reveal it.
     \item Click \textbf{OK} and restart Slicer.
 \end{enumerate}
+{\footnotesize\noindent\textbf{macOS:} Drag Slicer from the disk image into \textbf{Applications} (do not run it from the disk image). The first time, right-click Slicer $\rightarrow$ \textbf{Open} $\rightarrow$ \textbf{Open}. Move this tool's folder to your home folder (Finder: Cmd+Shift+H), not Downloads, Desktop, or Documents, or the module disappears after a restart. Then double-click \texttt{launch\_mac.command}.\par}
 
 \subsection*{How to Annotate}
-\begin{enumerate}[leftmargin=1.5em, itemsep=0pt, topsep=0.5pt, parsep=0pt]
+\begin{enumerate}[leftmargin=1.5em, itemsep=1.5pt, topsep=1pt]
     \item \textbf{Open the Module}
     \begin{itemize}[leftmargin=1.2em, itemsep=0.5pt]
         \item In the top toolbar, go to: \textbf{Modules} $\rightarrow$ \textbf{Annotation} $\rightarrow$ \textbf{Bounding Box Navigator} to display the panel on the right.
@@ -95,7 +78,7 @@ If the launch file did not open the module, add it inside Slicer once:
 \subsection*{Mouse \& Keyboard Shortcuts}
 \begin{center}
 \small
-\renewcommand{\arraystretch}{1.02}
+\renewcommand{\arraystretch}{1.08}
 \begin{tabular}{ll}
 \toprule
 \textbf{Shortcut / Control} & \textbf{Action} \\
@@ -113,9 +96,74 @@ If the launch file did not open the module, add it inside Slicer once:
 \end{tabular}
 \end{center}
 
-\vspace{0.08cm}
+\vfill
 \hrule
 \vspace{0.12cm}
-{\footnotesize\color{gray} Outputs: \texttt{<Output>/<case\_id>/R\_1.mrk.json} (or A/O/S/L) with summary in \texttt{\_annotation\_done.json}.}
+{\footnotesize\color{gray} Outputs: \texttt{<Output>/<case\_id>/R\_1.mrk.json} (or A/O/S/L) with summary in \texttt{\_annotation\_done.json}. Folder layout: last page.}
+
+\newpage
+{\Large\bfseries\color{darkblue} Troubleshooting: folder layout} \hfill {\small\bfseries Quick User Guide}\\[-0.2cm]
+\rule{\textwidth}{0.8pt}
+
+\vspace{0.15cm}
+The case name comes from the \textbf{filename}, not from the folder the file sits in. Subfolders are searched. Two patterns are accepted, and both may sit in the same folder:
+
+\begin{center}
+\small
+\texttt{\{case\_id\}\_\{AX|COR|SAG\}\_\{phase\}\_\{thickness\}.nii.gz}\\[0.15em]
+\texttt{\{case\_id\}\_\{scan number\}\_\{AX|COR|SAG\}\_\{phase\}\_\{thickness\}.nii.gz}
+\end{center}
+
+\vspace{-0.15cm}
+\begin{itemize}[leftmargin=1.3em, itemsep=1pt, topsep=2pt]
+    \item \textbf{case\_id} --- one token, no underscores (example: \texttt{1001}).
+    \item \textbf{scan number} --- optional digits (\texttt{2} or \texttt{02}). When it is present, the case and its annotation folder are \texttt{1001\_2}. When it is absent, the case stays \texttt{1001}. Those are two cases, even when the files share a folder.
+    \item \textbf{Plane} must be \texttt{AX}, \texttt{COR}, or \texttt{SAG}. Every case needs an \texttt{AX} file. A missing \texttt{COR} or \texttt{SAG} is reconstructed from the axial scan, and a warning is shown.
+    \item \textbf{Phase} (for example \texttt{pvp}) is read and then ignored for grouping. \textbf{Thickness} is \texttt{3mm}, \texttt{TS}, \texttt{2mm}, and so on.
+\end{itemize}
+
+\subsection*{Layouts that work}
+{\footnotesize
+\begin{verbatim}
+scans/                                      annotations/   (created on Save)
+  1001_AX_pvp_3mm.nii.gz                      1001/
+  1001_COR_pvp_3mm.nii.gz                       R_1.mrk.json
+  1001_SAG_pvp_3mm.nii.gz                       _annotation_done.json
+  1001_2_AX_pvp_3mm.nii.gz                    1001_2/
+  1001_2_COR_pvp_3mm.nii.gz                     R_1.mrk.json
+  patient_1004/                                 _annotation_done.json
+    1004_AX_pvp_3mm.nii.gz
+\end{verbatim}
+}
+\vspace{-0.35cm}
+{\small
+\texttt{1001\_*} is case \texttt{1001}. \texttt{1001\_2\_*} is case \texttt{1001\_2}. \texttt{patient\_1004/} does not matter: \texttt{1004\_AX\_\ldots} is case \texttt{1004}.
+On Save, boxes go to a folder of that same name. An existing folder is reused when it is named exactly \texttt{1001} or \texttt{1001\_2}, or when the name contains that id (\texttt{Scan 1001}). The folder \texttt{1001\_2} is not used for case \texttt{1001}.
+\par}
+
+\subsection*{When the scan does not line up}
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}p{0.40\textwidth}p{0.56\textwidth}@{}}
+\toprule
+\textbf{What you see} & \textbf{How to align the files} \\
+\midrule
+Two scans of one patient become one case, or boxes are saved in the wrong folder &
+Put the scan number in the filename: \texttt{1001\_2\_AX\_pvp\_3mm.nii.gz}. A folder named \texttt{1001\_2} is not enough. \\
+The case is called \texttt{image} or \texttt{volume}, not \texttt{1001} &
+The id is only on the folder. Rename the file so the id is in the name. \texttt{scans/1001/image.nii.gz} is case \texttt{image}. \\
+A case never appears &
+Add an axial file (\texttt{AX}). Coronal and sagittal files alone are not a case. \\
+Coronal and sagittal are reconstructions, and the case name is the whole filename &
+The name does not match the pattern above. Keep the order: case id, optional scan number, plane, phase, thickness. \\
+\textbf{Scan Folder} finds nothing &
+Point \textbf{Input Scans Folder} at the folder of \texttt{.nii.gz}, \texttt{.nii}, \texttt{.nrrd}, \texttt{.nhdr}, \texttt{.mha}, or \texttt{.mhd} files, not at the annotations folder. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.15cm}
+{\footnotesize\color{gray} A file that matches neither pattern is still loaded, as its own case: the id is a 4- or 5-digit run in the filename, or the filename itself when there is none. That one volume is shown in all three views.}
 
 \end{document}
