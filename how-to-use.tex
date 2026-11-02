@@ -116,8 +116,8 @@ The case name comes from the \textbf{filename}, not from the folder the file sit
 
 \vspace{-0.15cm}
 \begin{itemize}[leftmargin=1.3em, itemsep=1pt, topsep=2pt]
-    \item \textbf{case\_id} --- one token, no underscores (example: \texttt{1001}).
-    \item \textbf{scan number} --- optional digits (\texttt{2} or \texttt{02}). When it is present, the case and its annotation folder are \texttt{1001\_2}. When it is absent, the case stays \texttt{1001}. Those are two cases, even when the files share a folder.
+    \item \textbf{case\_id}: one token, no underscores (example: \texttt{1001}).
+    \item \textbf{scan number}: optional digits (\texttt{2} or \texttt{02}). When it is absent, the scan is number 1, so \texttt{1001\_AX\_\ldots} and \texttt{1001\_1\_AX\_\ldots} are one case, \texttt{1001}. Scan 2 and higher are their own case, such as \texttt{1001\_2}.
     \item \textbf{Plane} must be \texttt{AX}, \texttt{COR}, or \texttt{SAG}. Every case needs an \texttt{AX} file. A missing \texttt{COR} or \texttt{SAG} is reconstructed from the axial scan, and a warning is shown.
     \item \textbf{Phase} (for example \texttt{pvp}) is read and then ignored for grouping. \textbf{Thickness} is \texttt{3mm}, \texttt{TS}, \texttt{2mm}, and so on.
 \end{itemize}
@@ -137,7 +137,7 @@ scans/                                      annotations/   (created on Save)
 }
 \vspace{-0.35cm}
 {\small
-\texttt{1001\_*} is case \texttt{1001}. \texttt{1001\_2\_*} is case \texttt{1001\_2}. \texttt{patient\_1004/} does not matter: \texttt{1004\_AX\_\ldots} is case \texttt{1004}.
+\texttt{1001\_*} is case \texttt{1001}, scan 1. \texttt{1001\_2\_*} is case \texttt{1001\_2}. \texttt{patient\_1004/} does not matter: \texttt{1004\_AX\_\ldots} is case \texttt{1004}.
 On Save, boxes go to a folder of that same name. An existing folder is reused when it is named exactly \texttt{1001} or \texttt{1001\_2}, or when the name contains that id (\texttt{Scan 1001}). The folder \texttt{1001\_2} is not used for case \texttt{1001}.
 \par}
 
@@ -151,6 +151,8 @@ On Save, boxes go to a folder of that same name. An existing folder is reused wh
 \midrule
 Two scans of one patient become one case, or boxes are saved in the wrong folder &
 Put the scan number in the filename: \texttt{1001\_2\_AX\_pvp\_3mm.nii.gz}. A folder named \texttt{1001\_2} is not enough. \\
+A warning names a contrast phase conflict, or a file is ignored as a duplicate &
+Keep one scan per case id and scan number. Give another scan its own number, such as \texttt{1001\_2\_AX\_art\_3mm.nii.gz}. \\
 The case is called \texttt{image} or \texttt{volume}, not \texttt{1001} &
 The id is only on the folder. Rename the file so the id is in the name. \texttt{scans/1001/image.nii.gz} is case \texttt{image}. \\
 A case never appears &
@@ -164,6 +166,6 @@ Point \textbf{Input Scans Folder} at the folder of \texttt{.nii.gz}, \texttt{.ni
 \end{center}
 
 \vspace{0.15cm}
-{\footnotesize\color{gray} A file that matches neither pattern is still loaded, as its own case: the id is a 4- or 5-digit run in the filename, or the filename itself when there is none. That one volume is shown in all three views.}
+{\footnotesize\color{gray} A file that matches neither pattern is still loaded, as its own case: the id is a 4- or 5-digit run in the filename, or the filename itself when there is none. That one volume is shown in all three views. A markup file in a case folder that cannot be read is kept unchanged and listed in a pop-up. Leaving a case with unsaved changes asks first.}
 
 \end{document}

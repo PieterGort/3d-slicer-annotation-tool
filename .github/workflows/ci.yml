@@ -17,9 +17,15 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install test runner
+        run: python -m pip install pytest
+
       - name: Validate Python syntax
         run: |
-          python -m py_compile BoundingBoxNavigator/BoundingBoxNavigator.py
+          python -m py_compile BoundingBoxNavigator/*.py
+
+      - name: Run tests
+        run: python -m pytest tests -q
 
       - name: Validate Bash script syntax
         run: |

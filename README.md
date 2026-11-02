@@ -9,7 +9,7 @@ A streamlined 3D Slicer extension designed for radiologists to quickly navigate 
 ## Key Features
 
 - **Fast Case-by-Case Navigation:** Step sequentially through a cohort of scans with one click (`Save + Next`).
-- **Native AX / COR / SAG views:** Files named `{case_id}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz`, or `{case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz`, are grouped into one case. A scan number is part of the case folder (`1001` and `1001_2` stay separate, including when both names sit in the same folder). Each viewer shows the original acquisition when that plane exists.
+- **Native AX / COR / SAG views:** Files named `{case_id}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz`, or `{case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz`, are grouped into one case. A missing scan number means scan 1 (folder `1001`). Scan 2 and higher use their own folder (`1001_2`). Each viewer shows the original acquisition when that plane exists.
 - **Slice-thickness buttons:** Large buttons switch 3 mm, TS, or any other axial thickness (2 mm, 5 mm, …). If that thickness has no native COR/SAG, those views show reconstructions of the current axial volume.
 - **Missing-plane fallback:** If AX, COR, or SAG is missing, a warning is shown and COR/SAG are reconstructed from the axial scan (a case with no axial file is skipped).
 - **Finding-type naming:** Dropdown (default **PM nodule**) saves `R_1.mrk.json`, `A_1.mrk.json`, `O_1.mrk.json`, `S_1.mrk.json`, `L_1.mrk.json`. R boxes ≥ 30 mm become `pm_confluent` automatically.
@@ -71,7 +71,7 @@ If **BoundingBoxNavigator** did not open automatically on startup:
    - **Input Scans Folder:** Choose the folder containing your CT scan volumes (`.nii.gz`, `.nii`, `.nrrd`, `.mha`). For the radiologist package, use files named `{case_id}_{AX|COR|SAG}_{phase}_{3mm|TS}.nii.gz` or `{case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{3mm|TS}.nii.gz`.
    - **Output Annotations Folder:** Choose where annotations should be saved.
 2. Click **Scan Folder**.
-   - Matching files are grouped into one case per case id. When the filename includes a scan number, that number is part of the case (e.g. `1001_AX_...` is case `1001`, and `1001_2_AX_...` is case `1001_2`). Both forms can sit in the same folder.
+   - Matching files are grouped into one case per case id. A file without a scan number is scan 1 (e.g. `1001_AX_...` is case `1001`). Scan 2 and higher add the number (e.g. `1001_2_AX_...` is case `1001_2`). Both forms can sit in the same folder.
    - Cases are sorted naturally by case ID (e.g. case 1, 2, ..., 10).
    - The first unannotated case loads in Four-Up layout: **Red = original axial**, **Green = original coronal**, **Yellow = original sagittal**, with standard CT-Abdomen windowing (Window: 350, Level: 40).
    - Use the large **slice thickness** buttons to switch series (3 mm, TS, 2 mm, 5 mm, …). When a thickness has no native COR/SAG (typical for TS), coronal and sagittal show reconstructions of that axial volume.
@@ -105,7 +105,7 @@ If **BoundingBoxNavigator** did not open automatically on startup:
 
 ## Output Structure
 
-Inside your selected output folder, each case has its own folder named after its case ID. A scan number in the filename is included, so scan 2 of case 1001 is saved under `1001_2/`, not `1001/`:
+Inside your selected output folder, each case has its own folder named after its case ID. Scan 1 is saved under `1001/`. Scan 2 of case 1001 is saved under `1001_2/`, not `1001/`:
 
 ```
 <Output_Folder>/
@@ -171,12 +171,12 @@ Place all volumes for a batch in one folder (subfolders are scanned recursively)
 {case_id}_{scan number}_{view plane}_{phase}_{slice thickness}.nii.gz
 ```
 
-The scan number is optional. A folder may contain only the first form, only the second, or both. Files that share a case id and scan number are one case; a missing scan number is its own case and is not merged with a numbered scan.
+The scan number is optional. A folder may contain only the first form, only the second, or both. A file without a scan number is scan 1, so `1001_AX_...` and `1001_1_AX_...` belong to the same case. Scan 1 uses the folder `1001`. Scan 2 and higher use `{case_id}_{scan number}` (`1001_2`). If two files give the same plane and thickness in one case, the tool keeps the first one and shows a warning. A case that mixes contrast phases also shows a warning.
 
 | Token | Values | Role |
 | :--- | :--- | :--- |
 | `{case_id}` | e.g. `1001` | Patient / case id |
-| `{scan number}` | e.g. `2` (optional) | When present, the case and its bounding-box folder are named `{case_id}_{scan number}` (`1001_2`) |
+| `{scan number}` | e.g. `2` (optional) | Missing means scan 1. Scan 2 and higher are named `{case_id}_{scan number}` (`1001_2`) |
 | `{view plane}` | `AX`, `COR`, `SAG` | Native acquisition shown in that slice viewer |
 | `{phase}` | e.g. `pvp` | Contrast phase (parsed, not used for grouping) |
 | `{slice thickness}` | `3mm`, `TS`, `2mm`, `5mm`, … | Default views prefer `3mm`; other axial thicknesses are offered as buttons |
