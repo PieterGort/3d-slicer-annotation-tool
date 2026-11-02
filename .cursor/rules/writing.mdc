@@ -1,0 +1,19 @@
+---
+description: Spelling and grammar for public Bounding Box Navigator text
+alwaysApply: true
+---
+
+# Spelling and grammar
+
+Check spelling and grammar before a push to `dev` or `main`. Public text is `README.md`, `how-to-use.tex`, and user-visible strings in `BoundingBoxNavigator/BoundingBoxNavigator.py` (labels, buttons, status text, tooltips).
+
+## How to write
+
+- American English.
+- No em dash. Use a comma, a semicolon, or a new sentence.
+- The product name is **Bounding Box Navigator**. The module id is `BoundingBoxNavigator`.
+- Short sentences. No hype.
+
+This repository is Bounding Box Navigator. Do not use names, screens, or checks from another product.
+
+If this check failed, fix it before pushing to `dev` or `main`.

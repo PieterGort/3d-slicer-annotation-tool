@@ -254,6 +254,7 @@ ehthumbs.db
 /test_output/
 /test_out/
 /output/
+/local_tests/
 
 # 3D Slicer runtime & backup files
 *.mrml.bak

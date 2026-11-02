@@ -1,0 +1,20 @@
+---
+description: Run local save tests and do not commit them
+alwaysApply: true
+---
+
+# Local tests, never pushed
+
+Before a push to `dev` or `main`, run a local test that proves a saved bounding box shows up in the case folder. Do not commit the test, its fixtures, or its output.
+
+## Where the test lives
+
+Put the script and fixtures in `/tmp` or in `local_tests/`. `local_tests/` is gitignored. Use only synthetic names (`1001`, `1001_2`). No real scans.
+
+## What the test must show
+
+A saved box appears in the case folder the tool would use. Reading that folder back finds the saved file, including its name and case id.
+
+`saveNode` needs 3D Slicer. If Slicer is not available, still check filename parsing, case keys (`1001` versus `1001_2`), and the output-folder path. Say in the push note that the live save was not run.
+
+If this check failed, fix it before pushing to `dev` or `main`.
