@@ -105,7 +105,15 @@ def test_origin_shift_in_plane_is_reported():
     reference = axial()
     shifted = axial(1.0, origin=(2.0, 0.0, 0.0), dims=(512, 512, 298))
     shifted.update({"label": "AX TS", "thickness": "TS"})
-    assert any("starts 2.0 mm away" in m for m in compare_volumes(reference, shifted))
+    assert any("starts 2.0 mm away" in m and "slice plane" in m for m in compare_volumes(reference, shifted))
+
+
+def test_origin_shift_along_the_slice_direction_is_not_reported():
+    """3 mm and TS of the same scan often differ by about one thick-slice half-width."""
+    reference = axial()
+    shifted = axial(1.0, origin=(0.0, 0.0, 1.5), dims=(512, 512, 298))
+    shifted.update({"label": "AX TS", "thickness": "TS"})
+    assert compare_volumes(reference, shifted) == []
 
 
 def test_volume_covering_a_different_part_of_the_scan_is_reported():

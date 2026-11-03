@@ -66,7 +66,8 @@ class BoundingBoxNavigator(ScriptedLoadableModule):
             "Scan 1 uses the case folder {case_id}; scan 2 and higher use {case_id}_{scan_number}. "
             "Native AX/COR/SAG volumes are shown when present; missing planes or a thickness "
             "without a native pair (e.g. TS) use reconstructions of the current axial volume. "
-            "Boxes are saved as <letter>_<n>.mrk.json (R, A, O, S, L)."
+            "Boxes are stored in patient coordinates and saved as <letter>_<n>.mrk.json (R, A, O, S, L). "
+            "A finished box is written when drawing ends. Next saves the case and opens the next scan."
         )
         self.parent.acknowledgementText = (
             "Developed for fast medical imaging annotation in 3D Slicer."
@@ -376,7 +377,11 @@ class BoundingBoxNavigatorLogic(MarkupOps, VolumeOps, GeometryOps, ScriptedLoada
             return False
 
     def save_current_case(
-        self, notes: str = "", confirm_zero_boxes_fn=None
+        self,
+        notes: str = "",
+        confirm_zero_boxes_fn=None,
+        drop_unplaced: bool = True,
+        write_marker: bool = True,
     ) -> bool:
         """
         Save boxes in <output>/<case folder>/.
@@ -397,27 +402,32 @@ class BoundingBoxNavigatorLogic(MarkupOps, VolumeOps, GeometryOps, ScriptedLoada
         # Include any ROIs in scene that match
         valid_rois = [roi for roi in self.current_roi_nodes if self.is_roi_valid(roi)]
 
-        # Zero-box confirmation
+        # Zero-box confirmation. An automatic save never completes an empty case.
         if len(valid_rois) == 0:
-            if confirm_zero_boxes_fn:
-                confirmed = confirm_zero_boxes_fn(
-                    f"Case '{case_id}' has 0 bounding boxes.\n\n"
-                    "Do you want to save this case as completed with 0 boxes (e.g. PCI score 0)?"
-                )
-                if not confirmed:
-                    return False
+            if confirm_zero_boxes_fn is None:
+                return False
+            confirmed = confirm_zero_boxes_fn(
+                f"Case '{case_id}' has 0 bounding boxes.\n\n"
+                "Do you want to save this case as completed with 0 boxes (e.g. PCI score 0)?"
+            )
+            if not confirmed:
+                return False
 
-        # Remove unplaced or zero-sized ROIs from scene; record their names for the physician
-        self.last_dropped_boxes = [
-            roi.GetName() or "(unnamed box)"
-            for roi in self.current_roi_nodes
-            if roi not in valid_rois
-        ]
-        for roi in list(self.current_roi_nodes):
-            if roi not in valid_rois:
-                if slicer.mrmlScene.GetNodeByID(roi.GetID()):
-                    slicer.mrmlScene.RemoveNode(roi)
-        self.current_roi_nodes = list(valid_rois)
+        # A full save drops boxes that were never drawn. An automatic save leaves
+        # an in-progress box on screen so finishing one box does not delete the next.
+        if drop_unplaced:
+            self.last_dropped_boxes = [
+                roi.GetName() or "(unnamed box)"
+                for roi in self.current_roi_nodes
+                if roi not in valid_rois
+            ]
+            for roi in list(self.current_roi_nodes):
+                if roi not in valid_rois:
+                    if slicer.mrmlScene.GetNodeByID(roi.GetID()):
+                        slicer.mrmlScene.RemoveNode(roi)
+            self.current_roi_nodes = list(valid_rois)
+        else:
+            self.last_dropped_boxes = []
 
         entries = []
         for roi in valid_rois:
@@ -466,32 +476,31 @@ class BoundingBoxNavigatorLogic(MarkupOps, VolumeOps, GeometryOps, ScriptedLoada
             box_classes[target_file.name] = annotation["software_class"]
             box_findings[target_file.name] = annotation["finding"]
 
-        # Write completion marker JSON
-        now_utc = (
-            datetime.now(timezone.utc)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z")
-        )
-        marker_data = {
-            "case_id": case_id,
-            "source_volume": str(self.current_case["volume_path"]),
-            "source_volumes": {
-                key: str(path) for key, path in sorted(self.current_case.get("volumes", {}).items())
-            },
-            "completed_at_utc": now_utc,
-            "num_boxes": len(valid_rois),
-            "box_files": saved_filenames,
-            "box_classes": box_classes,
-            "box_findings": box_findings,
-            "notes": str(notes).strip(),
-            "format_version": 1,
-        }
-
-        marker_file = case_dir / COMPLETION_MARKER_FILENAME
-        tmp_marker = case_dir / f"{COMPLETION_MARKER_FILENAME}.tmp"
-        tmp_marker.write_text(json.dumps(marker_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp_marker.replace(marker_file)
+        if write_marker:
+            now_utc = (
+                datetime.now(timezone.utc)
+                .replace(microsecond=0)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+            marker_data = {
+                "case_id": case_id,
+                "source_volume": str(self.current_case["volume_path"]),
+                "source_volumes": {
+                    key: str(path) for key, path in sorted(self.current_case.get("volumes", {}).items())
+                },
+                "completed_at_utc": now_utc,
+                "num_boxes": len(valid_rois),
+                "box_files": saved_filenames,
+                "box_classes": box_classes,
+                "box_findings": box_findings,
+                "notes": str(notes).strip(),
+                "format_version": 1,
+            }
+            marker_file = case_dir / COMPLETION_MARKER_FILENAME
+            tmp_marker = case_dir / f"{COMPLETION_MARKER_FILENAME}.tmp"
+            tmp_marker.write_text(json.dumps(marker_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            tmp_marker.replace(marker_file)
 
         return True
 

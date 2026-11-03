@@ -214,18 +214,21 @@ def choose_output_dir(output_dir: Optional[Path], case_id: str) -> Optional[Path
 
 
 def case_is_completed(case_dir: Optional[Path], case_id: str) -> bool:
-    """True when the case folder has a matching completion marker or any markup file."""
+    """True when Next or Save wrote a matching completion marker.
+
+    Boxes on disk alone do not complete the case. That way a box can be written
+    when it is drawn, and the physician can still come back to add more.
+    """
     if case_dir is None or not case_dir.is_dir():
         return False
     marker_file = case_dir / COMPLETION_MARKER_FILENAME
-    if marker_file.is_file() and marker_file.stat().st_size > 0:
-        try:
-            payload = json.loads(marker_file.read_text(encoding="utf-8"))
-            if payload.get("case_id") == case_id:
-                return True
-        except Exception:
-            pass
-    return len(list(case_dir.glob("*.mrk.json"))) > 0
+    if not marker_file.is_file() or marker_file.stat().st_size <= 0:
+        return False
+    try:
+        payload = json.loads(marker_file.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return payload.get("case_id") == case_id
 
 
 def view_plan(volumes: Dict[str, Path], thickness: str, case_id: str) -> Dict[str, Any]:

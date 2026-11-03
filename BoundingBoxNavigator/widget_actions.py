@@ -12,6 +12,7 @@ import slicer
 
 from filenames import available_axial_thicknesses, thickness_display_label
 from markups import DEFAULT_FINDING_LETTER
+from session import differs_from_saved
 
 
 class WidgetActions:
@@ -26,7 +27,7 @@ class WidgetActions:
             self.set_status("Please select a valid input scans folder.", is_error=True)
             return
 
-        if not self._confirm_leave_case():
+        if not self._persist_before_leave():
             return
 
         input_dir = Path(input_path_str)
@@ -73,6 +74,7 @@ class WidgetActions:
         )
 
     def _populate_case_combobox(self):
+        current = self.logic.current_index
         self._updating_ui = True
         self.case_combobox.clear()
         total = len(self.logic.cases)
@@ -82,18 +84,21 @@ class WidgetActions:
             status_mark = "✓ " if completed else "   "
             item_text = f"[{idx + 1:02d}/{total:02d}] {status_mark}{case_id}"
             self.case_combobox.addItem(item_text, idx)
+        if 0 <= current < self.case_combobox.count:
+            self.case_combobox.setCurrentIndex(current)
         self._updating_ui = False
 
-    def load_case_index(self, index: int):
+    def load_case_index(self, index: int, persist: bool = True):
         """Load case and update all UI views."""
         if self._is_loading_case:
             return
         if index < 0 or index >= len(self.logic.cases):
             return
-        if not self._confirm_leave_case():
+        if persist and not self._persist_before_leave():
             self._restore_case_combobox()
             return
 
+        self._clear_roi_observers()
         self._is_loading_case = True
         try:
             result = self.logic.load_case(index)
@@ -122,6 +127,8 @@ class WidgetActions:
 
         self.notes_edit.setText(result.get("notes", ""))
         self.refresh_box_table()
+        for roi in self.logic.current_roi_nodes:
+            self._watch_roi(roi)
         self._mark_saved()
         self._update_progress_summary()
         self._try_autoload_segmentations()
@@ -297,6 +304,7 @@ class WidgetActions:
             self.logic.set_roi_visibility(roi_node, visible)
             state = "shown" if visible else "hidden"
             self.set_status(f"Box '{roi_node.GetName()}' is now {state}.")
+            self._autosave_boxes()
             return
         if column == self.COL_NAME:
             new_name = self.logic.rename_roi(roi_node, item.text())
@@ -304,6 +312,7 @@ class WidgetActions:
             item.setText(new_name)
             self._updating_ui = False
             self.set_status(f"Box name is now '{new_name}'.")
+            self._autosave_boxes()
             return
         if column == self.COL_FINDING:
             label = self.logic.set_roi_finding_text(roi_node, item.text())
@@ -313,6 +322,7 @@ class WidgetActions:
             self.set_status(
                 f"Finding for '{roi_node.GetName()}' is now '{label or 'none'}'."
             )
+            self._autosave_boxes()
 
     def on_box_table_selection_changed(self):
         """When an ROI row is selected in the table, jump slice viewers to its center."""
@@ -339,6 +349,7 @@ class WidgetActions:
         try:
             letter = self.finding_combo.itemData(self.finding_combo.currentIndex) or DEFAULT_FINDING_LETTER
             roi_node = self.logic.add_bounding_box(letter=str(letter))
+            self._watch_roi(roi_node)
             self.refresh_box_table()
             self.set_status(
                 f"Placing '{roi_node.GetName()}' ({self.logic.finding_label(roi_node)}). "
@@ -355,9 +366,16 @@ class WidgetActions:
             return
         roi_node = self._roi_for_row(selected_items[0].row())
         if roi_node:
+            self._unwatch_roi(roi_node)
             self.logic.delete_roi_node(roi_node)
             self.refresh_box_table()
-            self.set_status("Deleted selected bounding box.")
+            if any(self.logic.is_roi_valid(roi) for roi in self.logic.current_roi_nodes):
+                if self._autosave_boxes():
+                    self.set_status("Deleted selected bounding box and updated the saved files.")
+            else:
+                self.set_status(
+                    "Deleted the box on screen. Click Next and confirm to save this case with 0 boxes."
+                )
 
     def on_delete_all_clicked(self):
         """Delete all bounding boxes for current case."""
@@ -367,16 +385,21 @@ class WidgetActions:
             "Are you sure you want to delete ALL bounding boxes for this case?"
         )
         if confirmed:
+            self._clear_roi_observers()
             self.logic.delete_all_roi_nodes()
             self.refresh_box_table()
-            self.set_status("Deleted all bounding boxes.")
+            self.set_status(
+                "Deleted all boxes on screen. Click Next and confirm to save this case with 0 boxes."
+            )
 
-    def on_save_clicked(self) -> bool:
-        """Save current case annotations."""
+    def on_save_clicked(self, checked=False, quiet: bool = False, drop_unplaced: bool = True) -> bool:
+        """Save current case annotations. A quiet save writes finished boxes and stays on the case."""
+        del checked
         if self._is_saving:
             return False
         if self.logic.current_case is None:
-            self.set_status("No case loaded to save.", is_error=True)
+            if not quiet:
+                self.set_status("No case loaded to save.", is_error=True)
             return False
 
         self._is_saving = True
@@ -384,41 +407,133 @@ class WidgetActions:
             notes = self.notes_edit.text.strip()
             saved = self.logic.save_current_case(
                 notes=notes,
-                confirm_zero_boxes_fn=slicer.util.confirmYesNoDisplay,
+                confirm_zero_boxes_fn=None if quiet else slicer.util.confirmYesNoDisplay,
+                drop_unplaced=drop_unplaced,
+                write_marker=not quiet,
             )
             if not saved:
-                self.set_status("Save canceled by user.")
+                if not quiet:
+                    self.set_status("Save canceled by user.")
                 return False
 
+            if drop_unplaced:
+                self._rewatch_rois()
             self.refresh_box_table()
             self._mark_saved()
             self._populate_case_combobox()
             self._update_progress_summary()
             case_id = self.logic.current_case["case_id"]
-            num_boxes = len(self.logic.current_roi_nodes)
-            self.set_status(f"Saved case '{case_id}' successfully ({num_boxes} boxes).")
-            self._show_notice(
-                "These boxes had no size, so they were removed from the case folder on save:",
-                self.logic.last_dropped_boxes,
-            )
+            num_boxes = len([roi for roi in self.logic.current_roi_nodes if self.logic.is_roi_valid(roi)])
+            self.set_status(f"Saved case '{case_id}' ({num_boxes} boxes).")
+            if not quiet:
+                self._show_notice(
+                    "These boxes had no size, so they were removed from the case folder on save:",
+                    self.logic.last_dropped_boxes,
+                )
             return True
         except Exception as exc:
             self.set_status(f"Save failed: {exc}", is_error=True)
             traceback.print_exc()
-            slicer.util.errorDisplay(f"Save failed for case '{self.logic.current_case['case_id']}':\n{exc}")
+            if self.logic.current_case is not None:
+                slicer.util.errorDisplay(
+                    f"Save failed for case '{self.logic.current_case['case_id']}':\n{exc}"
+                )
             return False
         finally:
             self._is_saving = False
+
+    def _persist_before_leave(self, mark_empty_complete: bool = False) -> bool:
+        """Save when the open case changed. False means stay on this case."""
+        if self.logic.current_case is None:
+            return True
+        case_id = self.logic.current_case["case_id"]
+        dirty = differs_from_saved(self._saved_signature, self._current_signature())
+        incomplete = not self.logic.is_case_completed(case_id)
+        if not dirty and not (mark_empty_complete and incomplete):
+            return True
+        return self.on_save_clicked()
+
+    def _watch_interaction_mode(self) -> None:
+        """Save when drawing mode ends, so the last box is on disk without clicking Next."""
+        if getattr(self, "_interaction_observer", None) is not None:
+            return
+        node = slicer.mrmlScene.GetNodeByID("vtkMRMLInteractionNodeSingleton")
+        if node is None:
+            return
+        tag = node.AddObserver(
+            slicer.vtkMRMLInteractionNode.InteractionModeChangedEvent,
+            self._on_interaction_mode_changed,
+        )
+        self._interaction_observer = (node, tag)
+
+    def _on_interaction_mode_changed(self, caller, event) -> None:
+        if self._is_loading_case or self._is_saving:
+            return
+        try:
+            if caller.GetCurrentInteractionMode() == slicer.vtkMRMLInteractionNode.Place:
+                return
+        except Exception:
+            return
+        self._autosave_boxes()
+
+    def _watch_roi(self, roi_node) -> None:
+        if roi_node is None:
+            return
+        tag = roi_node.AddObserver(
+            slicer.vtkMRMLMarkupsNode.PointEndInteractionEvent,
+            self._on_roi_interaction_ended,
+        )
+        self._roi_observers.append((roi_node, tag))
+
+    def _on_roi_interaction_ended(self, caller, event) -> None:
+        if self._is_loading_case or self._is_saving:
+            return
+        try:
+            if not self.logic.is_roi_valid(caller):
+                return
+        except Exception:
+            return
+        self._autosave_boxes()
+
+    def _unwatch_roi(self, roi_node) -> None:
+        kept = []
+        for node, tag in self._roi_observers:
+            if node is roi_node:
+                try:
+                    node.RemoveObserver(tag)
+                except Exception:
+                    pass
+            else:
+                kept.append((node, tag))
+        self._roi_observers = kept
+
+    def _clear_roi_observers(self) -> None:
+        for node, tag in list(getattr(self, "_roi_observers", [])):
+            try:
+                node.RemoveObserver(tag)
+            except Exception:
+                pass
+        self._roi_observers = []
+
+    def _rewatch_rois(self) -> None:
+        self._clear_roi_observers()
+        for roi in self.logic.current_roi_nodes:
+            self._watch_roi(roi)
+
+    def _autosave_boxes(self) -> bool:
+        """Write finished boxes. An empty case is left for Next, which asks before completing it."""
+        if self._is_saving or self._is_loading_case or self.logic.current_case is None:
+            return False
+        if not any(self.logic.is_roi_valid(roi) for roi in self.logic.current_roi_nodes):
+            return False
+        return self.on_save_clicked(quiet=True, drop_unplaced=False)
 
     def on_save_next_clicked(self):
         """Save current case and advance to next."""
         if self._is_saving:
             return
-        if self.on_save_clicked():
-            self._go_to_next_case()
-
-    def on_next_no_save_clicked(self):
-        """Advance to next case without saving."""
+        if not self._persist_before_leave(mark_empty_complete=True):
+            return
         self._go_to_next_case()
 
     def _go_to_next_case(self):
@@ -448,9 +563,12 @@ class WidgetActions:
         self.load_case_index(prev_idx)
 
     def on_reload_clicked(self):
-        """Reload current case from disk."""
-        if self.logic.current_index >= 0:
-            self.load_case_index(self.logic.current_index)
+        """Reload current case from disk, after confirming unsaved edits can be dropped."""
+        if self.logic.current_index < 0:
+            return
+        if not self._confirm_leave_case():
+            return
+        self.load_case_index(self.logic.current_index, persist=False)
 
     def _try_autoload_segmentations(self) -> None:
         path_str = self.seg_path_picker.currentPath.strip()

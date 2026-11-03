@@ -147,17 +147,20 @@ class VolumeOps:
         if fit:
             slice_logic.FitSliceToAll()
 
-    def _slice_offset(self, view_name: str) -> Optional[float]:
+    def _slice_ras_center(self, view_name: str) -> Optional[List[float]]:
+        """RAS point at the center of a slice view. This is an anatomical position, not a slice index."""
         layout_manager = slicer.app.layoutManager()
         if layout_manager is None:
             return None
         slice_widget = layout_manager.sliceWidget(view_name)
         if slice_widget is None:
             return None
-        return slice_widget.sliceLogic().GetSliceNode().GetSliceOffset()
+        matrix = slice_widget.sliceLogic().GetSliceNode().GetSliceToRAS()
+        return [matrix.GetElement(i, 3) for i in range(3)]
 
-    def _set_slice_offset(self, view_name: str, offset: Optional[float]) -> None:
-        if offset is None:
+    def _jump_slice_through_ras(self, view_name: str, ras: Optional[List[float]]) -> None:
+        """Put the slice plane through the same patient point after the volume changes."""
+        if ras is None:
             return
         layout_manager = slicer.app.layoutManager()
         if layout_manager is None:
@@ -165,7 +168,11 @@ class VolumeOps:
         slice_widget = layout_manager.sliceWidget(view_name)
         if slice_widget is None:
             return
-        slice_widget.sliceLogic().GetSliceNode().SetSliceOffset(offset)
+        slice_node = slice_widget.sliceLogic().GetSliceNode()
+        jump = getattr(slice_node, "JumpSlice", None)
+        if jump is None:
+            return
+        jump(float(ras[0]), float(ras[1]), float(ras[2]))
 
     def _load_volume_file(self, path: Path, node_name: str):
         """Load a volume without showing it in every slice view."""
@@ -197,6 +204,8 @@ class VolumeOps:
         Show the chosen axial thickness in Red.
         Use native COR/SAG of the same thickness when they exist; otherwise
         reconstruct those views from the current axial volume.
+        preserve_offset keeps each view on the same patient point. A slice-offset
+        number is not reused, because 3 mm and TS slices are not the same index.
         """
         if self.current_case is None:
             raise RuntimeError("No case is currently loaded.")
@@ -226,10 +235,10 @@ class VolumeOps:
         if sag_node is None:
             sag_node = axial_node
 
-        offsets = {}
+        centers = {}
         if preserve_offset:
             for view_name in ("Red", "Green", "Yellow"):
-                offsets[view_name] = self._slice_offset(view_name)
+                centers[view_name] = self._slice_ras_center(view_name)
 
         self._ensure_four_up_layout()
         self._assign_volume_to_view("Red", axial_node, fit=fit, reconstruct=False)
@@ -242,8 +251,8 @@ class VolumeOps:
         }
 
         if preserve_offset:
-            for view_name, offset in offsets.items():
-                self._set_slice_offset(view_name, offset)
+            for view_name, ras in centers.items():
+                self._jump_slice_through_ras(view_name, ras)
 
         self.current_axial_thickness = thickness
         self.axial_using_ts = thickness.upper() == "TS"

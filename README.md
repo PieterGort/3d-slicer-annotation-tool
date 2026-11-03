@@ -8,11 +8,11 @@ A streamlined 3D Slicer extension designed for radiologists to quickly navigate 
 
 ## Key Features
 
-- **Fast Case-by-Case Navigation:** Step sequentially through a cohort of scans with one click (`Save + Next`).
+- **Fast Case-by-Case Navigation:** A finished box is written when you release the mouse. **Next** marks the case complete and opens the next scan. Boxes on disk alone do not skip the case, so a session can stop mid-scan and continue later.
 - **Native AX / COR / SAG views:** Files named `{case_id}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz`, or `{case_id}_{scan_number}_{AX|COR|SAG}_{phase}_{thickness}.nii.gz`, are grouped into one case. A missing scan number means scan 1 (folder `1001`). Scan 2 and higher use their own folder (`1001_2`). Each viewer shows the original acquisition when that plane exists.
 - **Slice-thickness buttons:** Large buttons switch 3 mm, TS, or any other axial thickness (2 mm, 5 mm, …). If that thickness has no native COR/SAG, those views show reconstructions of the current axial volume.
 - **Missing-plane fallback:** If AX, COR, or SAG is missing, a warning is shown and COR/SAG are reconstructed from the axial scan (a case with no axial file is skipped).
-- **Geometry check:** On load and when you switch thickness, a pop-up lists orientation, spacing, or origin mismatches between the volumes of the case, and boxes that sit outside a reconstructed view.
+- **Geometry check:** On load and when you switch thickness, a pop-up lists orientation, in-plane spacing, or in-plane origin mismatches between the volumes of the case, and boxes that sit outside a reconstructed view. Boxes are stored in patient coordinates, so one box is the annotation for every thickness of that scan.
 - **Finding-type naming:** Dropdown (default **PM nodule**) saves `R_1.mrk.json`, `A_1.mrk.json`, `O_1.mrk.json`, `S_1.mrk.json`, `L_1.mrk.json`. R boxes ≥ 30 mm become `pm_confluent` automatically.
 - **Segmentation overlay:** Panel 4 loads a `.seg.nrrd` file/folder, or a `.nii.gz` labelmap (forced as segmentation, not a CT volume).
 - **Notes & PCI Score Support:** Field to record PCI scores or clinical observations stored alongside the annotations in `_annotation_done.json`.
@@ -94,12 +94,15 @@ If **BoundingBoxNavigator** did not open automatically on startup:
 2. Click **Load segmentation**. `.nii.gz` files are imported as labelmaps (not as extra CT volumes).
 3. Matching filenames that contain the current case ID are preferred when a folder is selected.
 
-### 5. Save and Proceed
-- Click **💾 Save + Next ▶** (large green button).
+### 5. Next scan
+- Finish drawing a box (release the mouse). That box is written immediately. The case stays in the queue until **Next** or **Save**.
+- Click **Next ▶** (large green button).
   - Each box is saved as `<output>/<case_id>/<letter>_<n>.mrk.json` (e.g. `R_1.mrk.json`).
   - A completion marker `_annotation_done.json` is written.
   - Slicer clears the scene and loads the next uncompleted scan.
-- If a case has **0 lesions** (e.g. PCI score 0), clicking Save will ask for confirmation and then mark the case completed with 0 boxes.
+- **Save** writes the case, marks it complete, and stays on it. **Previous** writes a changed case before leaving.
+- If a case has **0 lesions** (e.g. PCI score 0), clicking Next asks for confirmation and then marks the case completed with 0 boxes.
+- Switching slice thickness keeps the view on the same patient point. The box does not move. A pop-up warns when orientation, in-plane spacing, or in-plane origin differ; those files have to be aligned before training.
 - When all scans are complete, an alert will notify you that the entire set is done.
 
 ---

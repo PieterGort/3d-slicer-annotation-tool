@@ -54,7 +54,7 @@
         \item \textbf{Click and drag} across the lesion on any slice view (axial, coronal, or sagittal).
         \item Drag the colored handles on the box to resize it in width, height, and depth.
         \item Scroll through slices with your mouse wheel to check coverage.
-        \item Use the large \textbf{slice thickness} buttons (3\,mm, TS, \ldots). For TS (or any thickness without native COR/SAG), coronal and sagittal show reconstructions of that axial scan.
+        \item Use the large \textbf{slice thickness} buttons (3\,mm, TS, \ldots). The box stays in patient coordinates, so the same box is used on TS, 2\,mm, 3\,mm, or 5\,mm. A pop-up warns if those series do not share one coordinate system. For TS (or any thickness without native COR/SAG), coronal and sagittal show reconstructions of that axial scan.
         \item Press \textbf{\fbox{\textbf{B}}} again for each additional lesion.
         \item \textit{To hide or show a box}: untick / tick the \textbf{Show} checkbox in front of it in the box list. Hidden boxes are still saved; this only hides them while you look at the scan.
         \item \textit{To remove a box}: click it in the list and press \textbf{Delete Selected}.
@@ -66,12 +66,12 @@
         \item Optional: in \textbf{4.\ Segmentation}, load a \texttt{.seg.nrrd} or \texttt{.nii.gz} overlay (\texttt{.nii.gz} is imported as a labelmap, not a CT volume).
     \end{itemize}
 
-    \item \textbf{Save and Next Scan}
+    \item \textbf{Next Scan}
     \begin{itemize}[leftmargin=1.2em, itemsep=0.5pt]
-        \item Click \textbf{Save + Next} (large green button).
+        \item A box is written when you release the mouse after drawing or resizing it. The scan stays in the queue until you click \textbf{Next}.
+        \item Click \textbf{Next} (large green button) to mark the case complete and load the next unreviewed scan.
         \item Each box is saved as \texttt{R\_1.mrk.json}, \texttt{A\_1.mrk.json}, \ldots inside a folder named after the case ID.
-        \item The next unreviewed scan loads immediately.
-        \item \textit{If there are 0 lesions (PCI 0)}: click \textbf{Save + Next} and confirm with \textbf{Yes}.
+        \item \textit{If there are 0 lesions (PCI 0)}: click \textbf{Next} and confirm with \textbf{Yes}.
     \end{itemize}
 \end{enumerate}
 
@@ -90,7 +90,8 @@
 \textbf{Click row in box table} & Centers all slice views on that lesion \\
 \textbf{Show checkbox (box table)} & Hide / show that bounding box in the views; hidden boxes are still saved \\
 \textbf{Skip completed (checkbox)} & Checked by default. Uncheck to browse or edit past cases \\
-\textbf{Slice thickness buttons} & Switch 3\,mm / TS / other; COR/SAG reconstruct from axial if needed \\
+\textbf{Next} & Save this case and open the next one \\
+\textbf{Slice thickness buttons} & Switch 3\,mm / TS / other; the box stays on the same tissue; COR/SAG reconstruct from axial if needed \\
 \textbf{Finding type} & PM nodule (R) default; also ascites, omental cake, stranding, lymph node \\
 \bottomrule
 \end{tabular}
@@ -168,6 +169,6 @@ Point \textbf{Input Scans Folder} at the folder of \texttt{.nii.gz}, \texttt{.ni
 \end{center}
 
 \vspace{0.15cm}
-{\footnotesize\color{gray} A file that matches neither pattern is still loaded as its own case. A markup file that cannot be read is kept and listed. Unsaved changes ask before leaving. A geometry pop-up lists orientation, spacing, origin, or a box outside a reconstructed view.}
+{\footnotesize\color{gray} A file that matches neither pattern is still loaded as its own case. A markup file that cannot be read is kept and listed. A box on disk does not complete the case; Next writes the completion marker. Previous saves a changed case before leaving. Reload can drop edits that are not written yet. A geometry pop-up lists orientation, in-plane spacing, in-plane origin, or a box outside a reconstructed view.}
 
 \end{document}

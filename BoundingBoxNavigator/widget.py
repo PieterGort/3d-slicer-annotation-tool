@@ -41,6 +41,8 @@ class BoundingBoxNavigatorWidget(WidgetActions, UnsavedChangesGuard, ScriptedLoa
         self._is_loading_case: bool = False
         self._saved_signature: Optional[str] = None
         self._thickness_buttons: Dict[str, Any] = {}
+        self._roi_observers: list = []
+        self._interaction_observer = None
 
     def setup(self):
         super().setup()
@@ -145,22 +147,26 @@ class BoundingBoxNavigatorWidget(WidgetActions, UnsavedChangesGuard, ScriptedLoa
         # Primary Navigation buttons
         button_row_1 = qt.QHBoxLayout()
         self.prev_button = qt.QPushButton("◀ Previous")
-        self.next_no_save_button = qt.QPushButton("Next (No Save) ▶")
         self.reload_button = qt.QPushButton("⟳ Reload")
+        self.prev_button.setToolTip("Save this case if it changed, then open the previous case.")
+        self.reload_button.setToolTip("Discard changes that are not saved yet and load this case from disk.")
 
         button_row_1.addWidget(self.prev_button)
-        button_row_1.addWidget(self.next_no_save_button)
         button_row_1.addWidget(self.reload_button)
         nav_layout.addLayout(button_row_1)
 
         button_row_2 = qt.QHBoxLayout()
         self.save_button = qt.QPushButton("💾 Save")
         self.save_button.setStyleSheet("font-weight: bold; padding: 6px;")
+        self.save_button.setToolTip("Write this case and stay on it.")
 
-        self.save_next_button = qt.QPushButton("💾 Save + Next ▶")
+        self.save_next_button = qt.QPushButton("Next ▶")
         self.save_next_button.setStyleSheet(
             "font-weight: bold; font-size: 13px; padding: 8px; "
             "background-color: #2E7D32; color: white; border-radius: 4px;"
+        )
+        self.save_next_button.setToolTip(
+            "Save this case and open the next one. A box is also written when you finish drawing it."
         )
         button_row_2.addWidget(self.save_button)
         button_row_2.addWidget(self.save_next_button, 1)
@@ -227,9 +233,10 @@ class BoundingBoxNavigatorWidget(WidgetActions, UnsavedChangesGuard, ScriptedLoa
             "Workflow: Choose a finding type (PM nodule is default), press 'B', then click and drag "
             "in any slice. New boxes start as R_1, A_1, … ; double-click the Name cell to rename any "
             "box, and type in the Finding cell to set or change its type. Untick 'Show' to hide a box "
-            "while you inspect the scan (hidden boxes are still saved). Use the large thickness buttons "
-            "to switch series; if a thickness has no native COR/SAG, those views show reconstructions "
-            "of the current axial volume."
+            "while you inspect the scan (hidden boxes are still saved). A finished box is written to "
+            "disk when you release the mouse. Next saves the case and opens the next scan. "
+            "Use the large thickness buttons to switch series; the box stays in patient coordinates. "
+            "If a thickness has no native COR/SAG, those views show reconstructions of the current axial volume."
         )
         hint_label.setWordWrap(True)
         hint_label.setStyleSheet("color: #666; font-size: 11px; padding: 2px;")
@@ -297,7 +304,6 @@ class BoundingBoxNavigatorWidget(WidgetActions, UnsavedChangesGuard, ScriptedLoa
 
         self.case_combobox.currentIndexChanged.connect(self.on_case_combobox_changed)
         self.prev_button.clicked.connect(self.on_prev_clicked)
-        self.next_no_save_button.clicked.connect(self.on_next_no_save_clicked)
         self.reload_button.clicked.connect(self.on_reload_clicked)
         self.save_button.clicked.connect(self.on_save_clicked)
         self.save_next_button.clicked.connect(self.on_save_next_clicked)
@@ -311,8 +317,17 @@ class BoundingBoxNavigatorWidget(WidgetActions, UnsavedChangesGuard, ScriptedLoa
         self.delete_all_button.clicked.connect(self.on_delete_all_clicked)
         self.box_table.itemSelectionChanged.connect(self.on_box_table_selection_changed)
         self.box_table.itemChanged.connect(self.on_box_table_item_changed)
+        self._watch_interaction_mode()
 
     def cleanup(self):
+        self._clear_roi_observers()
+        pair = getattr(self, "_interaction_observer", None)
+        if pair:
+            try:
+                pair[0].RemoveObserver(pair[1])
+            except Exception:
+                pass
+            self._interaction_observer = None
         if self.shortcut_b:
             self.shortcut_b.disconnect()
             self.shortcut_b = None

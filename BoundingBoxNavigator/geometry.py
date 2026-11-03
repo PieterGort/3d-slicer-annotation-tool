@@ -55,6 +55,20 @@ def _origin(matrix: Sequence[Sequence[float]]) -> List[float]:
     return [float(matrix[r][3]) for r in range(3)]
 
 
+def _origin_offsets(
+    reference: Sequence[Sequence[float]], other: Sequence[Sequence[float]]
+) -> Tuple[float, float]:
+    """In-plane and through-plane distance between two volume origins, in mm.
+
+    The through-plane axis is the slice direction of the reference volume.
+    """
+    delta = [b - a for a, b in zip(_origin(reference), _origin(other))]
+    normal = axes(reference)[2]
+    through = sum(delta[i] * normal[i] for i in range(3))
+    in_plane = [delta[i] - through * normal[i] for i in range(3)]
+    return _norm(in_plane), abs(through)
+
+
 def spacing(matrix: Sequence[Sequence[float]]) -> List[float]:
     """Voxel size along i, j, k in mm (length of each matrix column)."""
     return [_norm(_column(matrix, j)) for j in range(3)]
@@ -208,12 +222,10 @@ def compare_volumes(reference: Dict[str, Any], other: Dict[str, Any]) -> List[st
                 f"but {ref_label} has {ref_sp[0]:.2f} x {ref_sp[1]:.2f} mm."
             )
 
-        ref_origin = _origin(reference["matrix"])
-        other_origin = _origin(other["matrix"])
-        shift = max(abs(ref_origin[i] - other_origin[i]) for i in (0, 1))
-        if shift > ORIGIN_TOL_MM:
+        in_plane, _through = _origin_offsets(reference["matrix"], other["matrix"])
+        if in_plane > ORIGIN_TOL_MM:
             messages.append(
-                f"{label} starts {shift:.1f} mm away from {ref_label} in the x or y direction."
+                f"{label} starts {in_plane:.1f} mm away from {ref_label} in the slice plane."
             )
 
     ref_bounds = ras_bounds(reference["matrix"], reference["dims"])

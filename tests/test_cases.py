@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from cases import build_cases, choose_output_dir, scan_input_dir, view_plan
+from cases import build_cases, case_is_completed, choose_output_dir, scan_input_dir, view_plan
 
 
 def touch(folder: Path, name: str) -> Path:
@@ -201,6 +201,18 @@ def test_flat_folder_without_a_case_id_does_not_warn(tmp_path):
     touch(tmp_path, "1002_AX_pvp_3mm.nii.gz")
     _cases, warnings = scan_input_dir(tmp_path)
     assert not any("Check folder" in message for message in warnings)
+
+
+def test_boxes_on_disk_do_not_complete_a_case_until_the_marker_is_written(tmp_path):
+    case_dir = tmp_path / "1001"
+    case_dir.mkdir()
+    (case_dir / "R_1.mrk.json").write_text("{}", encoding="utf-8")
+    assert case_is_completed(case_dir, "1001") is False
+    (case_dir / "_annotation_done.json").write_text(
+        '{"case_id": "1001"}\n', encoding="utf-8"
+    )
+    assert case_is_completed(case_dir, "1001") is True
+    assert case_is_completed(case_dir, "1001_2") is False
 
 
 def test_output_folder_prefers_the_exact_case_key(tmp_path):
