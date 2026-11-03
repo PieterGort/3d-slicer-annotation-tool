@@ -142,6 +142,67 @@ def test_duplicate_plane_and_thickness_keeps_the_first_file(tmp_path):
     assert any("ignoring '1001_AX_pvp_3mm.nii.gz'" in message for message in warnings)
 
 
+def test_one_folder_per_case_keeps_each_case_on_its_own(tmp_path):
+    for case_id in ("1001", "1002"):
+        folder = tmp_path / case_id
+        folder.mkdir()
+        touch(folder, f"{case_id}_AX_pvp_3mm.nii.gz")
+        touch(folder, f"{case_id}_COR_pvp_3mm.nii.gz")
+        touch(folder, f"{case_id}_SAG_pvp_3mm.nii.gz")
+    cases, warnings = scan_input_dir(tmp_path)
+    by_id = {case["case_id"]: case for case in cases}
+    assert set(by_id) == {"1001", "1002"}
+    assert set(by_id["1001"]["volumes"]) == {"AX_3mm", "COR_3mm", "SAG_3mm"}
+    assert by_id["1001"]["volumes"]["AX_3mm"].parent.name == "1001"
+    assert by_id["1002"]["volumes"]["SAG_3mm"].parent.name == "1002"
+    assert not any("Check folder" in message for message in warnings)
+
+
+def test_scan_of_another_case_inside_a_case_folder_is_warned(tmp_path):
+    folder = tmp_path / "1001"
+    folder.mkdir()
+    touch(folder, "1001_AX_pvp_3mm.nii.gz")
+    touch(folder, "1001_COR_pvp_3mm.nii.gz")
+    touch(folder, "1001_SAG_pvp_3mm.nii.gz")
+    touch(folder, "1002_AX_pvp_3mm.nii.gz")
+    cases, warnings = scan_input_dir(tmp_path)
+    by_id = {case["case_id"]: case for case in cases}
+    assert set(by_id) == {"1001", "1002"}
+    assert set(by_id["1001"]["volumes"]) == {"AX_3mm", "COR_3mm", "SAG_3mm"}
+    assert by_id["1002"]["volumes"]["AX_3mm"].name == "1002_AX_pvp_3mm.nii.gz"
+    assert (
+        "Check folder '1001': 1002_AX_pvp_3mm.nii.gz is case 1002, not 1001."
+        in warnings
+    )
+
+
+def test_wrong_case_in_a_subfolder_is_still_warned(tmp_path):
+    folder = tmp_path / "Scan 1001" / "series"
+    folder.mkdir(parents=True)
+    touch(folder, "1002_COR_pvp_3mm.nii.gz")
+    _cases, warnings = scan_input_dir(tmp_path)
+    assert (
+        "Check folder 'Scan 1001': 1002_COR_pvp_3mm.nii.gz is case 1002, not 1001."
+        in warnings
+    )
+
+
+def test_second_scan_of_the_same_case_in_its_folder_is_not_a_mismatch(tmp_path):
+    folder = tmp_path / "1001"
+    folder.mkdir()
+    touch(folder, "1001_2_AX_pvp_3mm.nii.gz")
+    cases, warnings = scan_input_dir(tmp_path)
+    assert [case["case_id"] for case in cases] == ["1001_2"]
+    assert not any("Check folder" in message for message in warnings)
+
+
+def test_flat_folder_without_a_case_id_does_not_warn(tmp_path):
+    touch(tmp_path, "1001_AX_pvp_3mm.nii.gz")
+    touch(tmp_path, "1002_AX_pvp_3mm.nii.gz")
+    _cases, warnings = scan_input_dir(tmp_path)
+    assert not any("Check folder" in message for message in warnings)
+
+
 def test_output_folder_prefers_the_exact_case_key(tmp_path):
     (tmp_path / "1001").mkdir()
     (tmp_path / "1001_2").mkdir()

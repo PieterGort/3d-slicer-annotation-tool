@@ -14,6 +14,7 @@ from filenames import (
     SUPPORTED_EXTENSIONS,
     available_axial_thicknesses,
     default_axial_thickness,
+    enclosing_case_folder,
     extract_case_id,
     name_contains_case_key,
     natural_sort_key,
@@ -43,12 +44,16 @@ def list_volume_files(input_dir: Path) -> List[Path]:
     return found_files
 
 
-def build_cases(found_files: List[Path]) -> Tuple[List[Dict[str, Any]], List[str]]:
+def build_cases(
+    found_files: List[Path], root: Optional[Path] = None
+) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
     Group volume files into cases.
 
     Native AX/COR/SAG files that share a case id and scan number are one case.
     A second file for the same plane and thickness is ignored. The warning names that file.
+    A file whose case id does not match the case folder it sits in is still loaded,
+    and the warning names that folder and file.
     A case with no axial volume is skipped.
     """
     warnings: List[str] = []
@@ -68,6 +73,14 @@ def build_cases(found_files: List[Path]) -> Tuple[List[Dict[str, Any]], List[str
 
         case_id = parsed["case_id"]
         vol_key = parsed["volume_key"]
+        if root is not None:
+            folder = enclosing_case_folder(file_path, root)
+            if folder is not None and folder[1] != parsed["base_id"]:
+                warn(
+                    f"Check folder '{folder[0]}': {file_path.name} is case "
+                    f"{parsed['base_id']}, not {folder[1]}."
+                )
+
         if case_id not in grouped:
             grouped[case_id] = {
                 "case_id": case_id,
@@ -169,7 +182,7 @@ def scan_input_dir(input_dir: Path) -> Tuple[List[Dict[str, Any]], List[str]]:
     input_dir = Path(input_dir)
     if not input_dir.exists() or not input_dir.is_dir():
         raise ValueError(f"Input directory does not exist: {input_dir}")
-    return build_cases(list_volume_files(input_dir))
+    return build_cases(list_volume_files(input_dir), root=input_dir)
 
 
 def choose_output_dir(output_dir: Optional[Path], case_id: str) -> Optional[Path]:

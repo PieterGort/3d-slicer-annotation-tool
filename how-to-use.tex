@@ -155,6 +155,8 @@ A warning names a contrast phase conflict, or a file is ignored as a duplicate &
 Keep one scan per case id and scan number. Give another scan its own number, such as \texttt{1001\_2\_AX\_art\_3mm.nii.gz}. \\
 The case is called \texttt{image} or \texttt{volume}, not \texttt{1001} &
 The id is only on the folder. Rename the file so the id is in the name. \texttt{scans/1001/image.nii.gz} is case \texttt{image}. \\
+A warning says folder \texttt{1001} contains a file for case \texttt{1002} &
+Move that file to its own folder. One case folder should not hold another case. \\
 A case never appears &
 Add an axial file (\texttt{AX}). Coronal and sagittal files alone are not a case. \\
 Coronal and sagittal are reconstructions, and the case name is the whole filename &

@@ -71,6 +71,31 @@ def get_clean_stem(path: Path) -> str:
     return path.stem
 
 
+def case_id_in_text(name: str) -> Optional[str]:
+    """A 4-5 digit case id in a folder name, or None when the name has none."""
+    match = re.search(r"(?<!\d)\d{4,5}(?!\d)", name or "")
+    return match.group(0) if match else None
+
+
+def enclosing_case_folder(file_path: Path, root: Path) -> Optional[Tuple[str, str]]:
+    """
+    Nearest folder at or below root whose name contains a case id.
+
+    Returns (folder name, case id). The walk includes root and does not go above it.
+    """
+    root = Path(root).resolve()
+    current = Path(file_path).resolve().parent
+    if current != root and root not in current.parents:
+        return None
+    while True:
+        found = case_id_in_text(current.name)
+        if found:
+            return current.name, found
+        if current == root or current.parent == current:
+            return None
+        current = current.parent
+
+
 def extract_case_id(filename_or_path: Path | str) -> str:
     """
     Extract 4-5 digit case ID from file stem using regex (?<!\\d)\\d{4,5}(?!\\d).
